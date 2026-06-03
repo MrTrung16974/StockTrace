@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from contextlib import suppress
 
 from aiogram import Bot, Dispatcher
@@ -10,18 +11,29 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.utils.token import TokenValidationError
 
+from stocktrace.application.services.market_data import MarketDataService
 from stocktrace.application.services.watchlist import WatchlistService
 from stocktrace.infrastructure.config import Settings
 from stocktrace.infrastructure.logging.config import get_logger
-from stocktrace.infrastructure.telegram.handlers import create_router
+from stocktrace.infrastructure.scheduler import SchedulerService
+from stocktrace.infrastructure.telegram.aiogram_router import create_router
 
 
 class TelegramBotRunner:
     """Run Telegram polling in the application lifecycle."""
 
-    def __init__(self, settings: Settings, watchlist_service: WatchlistService) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        watchlist_service: WatchlistService,
+        market_data_service: MarketDataService,
+        scheduler_service_factory: Callable[[Bot], SchedulerService] | None = None,
+    ) -> None:
         self._settings = settings
         self._watchlist_service = watchlist_service
+        self._market_data_service = market_data_service
+        self._scheduler_service_factory = scheduler_service_factory
+        self._scheduler_service: SchedulerService | None = None
         self._logger = get_logger(__name__)
         self._bot: Bot | None = None
         self._dispatcher: Dispatcher | None = None
@@ -32,6 +44,7 @@ class TelegramBotRunner:
         """Return whether the runner has enough configuration to start."""
         return (
             self._settings.telegram.bot_token is not None
+            and self._settings.telegram.bot_token.get_secret_value().strip() != ""
             and self._settings.telegram.polling_enabled
         )
 
@@ -47,7 +60,7 @@ class TelegramBotRunner:
             return
 
         token = self._settings.telegram.bot_token
-        if token is None:
+        if token is None or token.get_secret_value().strip() == "":
             return
 
         try:
@@ -61,13 +74,27 @@ class TelegramBotRunner:
             return
 
         self._dispatcher = Dispatcher()
-        self._dispatcher.include_router(create_router(self._settings, self._watchlist_service))
+        self._dispatcher.include_router(
+            create_router(
+                self._settings,
+                self._watchlist_service,
+                self._market_data_service,
+            ),
+        )
+
+        if self._scheduler_service_factory is not None:
+            self._scheduler_service = self._scheduler_service_factory(self._bot)
+            self._scheduler_service.start()
 
         self._task = asyncio.create_task(self._poll(), name="telegram-polling")
         self._logger.info("telegram_polling_started")
 
     async def stop(self) -> None:
         """Stop Telegram polling and close the bot session."""
+        if self._scheduler_service is not None:
+            await self._scheduler_service.shutdown()
+            self._scheduler_service = None
+
         if self._task is not None:
             self._task.cancel()
             with suppress(asyncio.CancelledError):

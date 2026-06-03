@@ -15,7 +15,11 @@ from stocktrace.infrastructure.telegram import TelegramBotRunner
 async def test_telegram_runner_skips_when_token_is_missing() -> None:
     settings = load_test_settings()
     container = Container(settings=settings)
-    runner = TelegramBotRunner(settings=settings, watchlist_service=container.watchlist_service())
+    runner = TelegramBotRunner(
+        settings=settings,
+        watchlist_service=container.watchlist_service(),
+        market_data_service=container.market_data_service(),
+    )
 
     await runner.start()
     await runner.stop()
@@ -32,7 +36,11 @@ async def test_telegram_runner_does_not_crash_on_invalid_token() -> None:
         polling_enabled=True,
     )
     container = Container(settings=settings)
-    runner = TelegramBotRunner(settings=settings, watchlist_service=container.watchlist_service())
+    runner = TelegramBotRunner(
+        settings=settings,
+        watchlist_service=container.watchlist_service(),
+        market_data_service=container.market_data_service(),
+    )
 
     await runner.start()
     await runner.stop()

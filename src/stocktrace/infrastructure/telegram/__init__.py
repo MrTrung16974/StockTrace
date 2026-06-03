@@ -1,4 +1,4 @@
-"""Telegram bot adapter."""
+"""Telegram bot adapter exports."""
 
 from stocktrace.infrastructure.telegram.runner import TelegramBotRunner
 

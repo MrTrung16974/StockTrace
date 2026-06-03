@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from decimal import Decimal
+from html import escape
 
+from stocktrace.application.services.market_data import NewsArticle, StockQuote
 from stocktrace.domain.entities.watchlist_item import WatchlistItem
 from stocktrace.infrastructure.config import Settings
 
@@ -32,8 +35,6 @@ def build_help_message() -> str:
             "/add SYMBOL",
             "/remove SYMBOL",
             "/list",
-            "",
-            "Coming next:",
             "/price SYMBOL",
             "/news SYMBOL",
         ],
@@ -75,3 +76,45 @@ def build_removed_message(symbol: str, removed: bool) -> str:
     if removed:
         return f"Removed {symbol} from watchlist."
     return f"{symbol} was not in watchlist."
+
+
+def build_price_message(quote: StockQuote) -> str:
+    """Build the /price response."""
+    return "\n".join(
+        [
+            escape(quote.ticker),
+            f"Giá: {_format_vn_price(quote.current_price)}",
+            f"{_format_signed_decimal(quote.change_percent)}%",
+        ],
+    )
+
+
+def build_news_message(symbol: str, articles: Sequence[NewsArticle]) -> str:
+    """Build the /news response."""
+    clean_symbol = escape(symbol)
+    if not articles:
+        return f"No recent news found for {clean_symbol}."
+
+    lines = [f"News for {clean_symbol}:"]
+    for index, article in enumerate(articles, start=1):
+        title = escape(article.title)
+        url = escape(article.url)
+        lines.append(f'{index}. <a href="{url}">{title}</a>')
+    return "\n".join(lines)
+
+
+def _format_decimal(value: Decimal) -> str:
+    normalized = value.quantize(Decimal("0.01")) if value.as_tuple().exponent < -2 else value
+    return f"{normalized:,}"
+
+
+def _format_signed_decimal(value: Decimal) -> str:
+    prefix = "+" if value > 0 else ""
+    return f"{prefix}{_format_decimal(value)}"
+
+
+def _format_vn_price(value: Decimal) -> str:
+    if value == value.to_integral():
+        return f"{int(value):,}".replace(",", ".")
+    formatted = f"{value:,.2f}"
+    return formatted.replace(",", "_").replace(".", ",").replace("_", ".")

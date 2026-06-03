@@ -1,1 +1,5 @@
-"""Scheduler adapters package for Phase 8."""
+"""Scheduler adapters package."""
+
+from stocktrace.infrastructure.scheduler.service import SchedulerService
+
+__all__ = ["SchedulerService"]

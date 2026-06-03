@@ -5,14 +5,7 @@ from __future__ import annotations
 from enum import StrEnum
 from functools import lru_cache
 
-from pydantic import (
-    AliasChoices,
-    BaseModel,
-    Field,
-    SecretStr,
-    field_validator,
-    model_validator,
-)
+from pydantic import AliasChoices, BaseModel, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -34,7 +27,7 @@ class AppSettings(BaseModel):
 class ApiSettings(BaseModel):
     """HTTP API settings."""
 
-    host: str = "127.0.0.1"
+    host: str = "0.0.0.0"
     port: int = Field(default=8000, ge=1, le=65535)
     cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:8000"])
 
@@ -61,6 +54,13 @@ class RedisSettings(BaseModel):
     default_ttl_seconds: int = Field(default=300, ge=1)
 
 
+class CacheSettings(BaseModel):
+    """Market data cache TTL settings."""
+
+    quote_ttl_seconds: int = Field(default=30, ge=1)
+    news_ttl_seconds: int = Field(default=300, ge=1)
+
+
 class TelegramSettings(BaseModel):
     """Telegram bot settings."""
 
@@ -85,17 +85,38 @@ class SecuritySettings(BaseModel):
             "/redoc",
             "/health/live",
             "/health/ready",
+            "/api/v1/stocks",
         ],
     )
 
 
-class ProviderSettings(BaseModel):
+class ProvidersSettings(BaseModel):
     """External provider execution policy."""
 
     request_timeout_seconds: float = Field(default=10.0, gt=0)
     max_retries: int = Field(default=3, ge=0)
     circuit_breaker_failure_threshold: int = Field(default=5, ge=1)
     circuit_breaker_reset_seconds: int = Field(default=60, ge=1)
+
+
+class SchedulerSettings(BaseModel):
+    """Scheduled Telegram job settings."""
+
+    enabled: bool = True
+    timezone: str = "Asia/Ho_Chi_Minh"
+    watchlist_symbols: list[str] = Field(default_factory=list)
+    news_digest_hours: list[int] = Field(default_factory=lambda: [7, 12, 19])
+    price_alert_interval_minutes: int = Field(default=5, ge=1)
+    news_digest_limit: int = Field(default=5, ge=1, le=20)
+    news_symbol_delay_seconds: float = Field(default=0.5, ge=0)
+
+    @field_validator("watchlist_symbols", mode="before")
+    @classmethod
+    def parse_watchlist_symbols(cls, value: object) -> object:
+        """Allow comma-separated watchlists in addition to JSON lists."""
+        if isinstance(value, str):
+            return [symbol.strip().upper() for symbol in value.split(",") if symbol.strip()]
+        return value
 
 
 class LoggingSettings(BaseModel):
@@ -132,9 +153,11 @@ class Settings(BaseSettings):
     api: ApiSettings = Field(default_factory=ApiSettings)
     database: DatabaseSettings = Field(default_factory=DatabaseSettings)
     redis: RedisSettings = Field(default_factory=RedisSettings)
+    cache: CacheSettings = Field(default_factory=CacheSettings)
     telegram: TelegramSettings = Field(default_factory=TelegramSettings)
     security: SecuritySettings = Field(default_factory=SecuritySettings)
-    providers: ProviderSettings = Field(default_factory=ProviderSettings)
+    providers: ProvidersSettings = Field(default_factory=ProvidersSettings)
+    scheduler: SchedulerSettings = Field(default_factory=SchedulerSettings)
     logging: LoggingSettings = Field(default_factory=LoggingSettings)
 
     @model_validator(mode="after")

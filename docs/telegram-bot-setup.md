@@ -271,16 +271,22 @@ Then open your bot in Telegram and send:
 /start
 /status
 /help
+/price FPT
+/news FPT
 ```
 
-The first connected commands are:
+The connected commands are:
 
 - `/start`
 - `/help`
 - `/status`
+- `/add SYMBOL`
+- `/remove SYMBOL`
+- `/list`
+- `/price SYMBOL`
+- `/news SYMBOL`
 
-Stock trading commands such as `/add`, `/price`, `/news`, and alert delivery are extension points
-for the next implementation phases.
+Alert delivery remains an extension point for the next implementation phases.
 
 ## Step 6: Security Boundaries
 

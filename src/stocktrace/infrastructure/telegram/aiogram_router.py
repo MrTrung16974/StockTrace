@@ -1,4 +1,4 @@
-"""Telegram command handlers."""
+"""Aiogram Telegram command router."""
 
 from __future__ import annotations
 

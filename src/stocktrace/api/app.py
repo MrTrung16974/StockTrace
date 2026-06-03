@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from stocktrace.api.middleware.request_timing import RequestTimingMiddleware
 from stocktrace.api.middleware.security import ApiSecurityMiddleware
-from stocktrace.api.routers import health, system
+from stocktrace.api.routers import health, stocks, system
 from stocktrace.bootstrap.container import Container
 from stocktrace.infrastructure.config import Settings, get_settings
 from stocktrace.infrastructure.logging.config import configure_logging, get_logger
@@ -34,6 +34,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.telegram_runner = TelegramBotRunner(
         settings=settings,
         watchlist_service=container.watchlist_service(),
+        market_data_service=container.market_data_service(),
+        scheduler_service_factory=container.scheduler_service,
     )
     await app.state.telegram_runner.start()
     yield
@@ -68,4 +70,5 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.include_router(health.router)
     app.include_router(system.router)
+    app.include_router(stocks.router)
     return app

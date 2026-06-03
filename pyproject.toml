@@ -96,6 +96,7 @@ no_implicit_optional = true
 
 [[tool.mypy.overrides]]
 module = [
+  "apscheduler.*",
   "feedparser.*"
 ]
 ignore_missing_imports = true
