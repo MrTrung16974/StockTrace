@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
-from typing import Any, cast
+from typing import Any, ClassVar, cast
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -15,6 +15,12 @@ from stocktrace.application.services.market_data import (
     StockQuote,
 )
 
+HTTP_TOO_MANY_REQUESTS = 429
+HTTP_NOT_FOUND = 404
+HTTP_UNPROCESSABLE_ENTITY = 422
+MIN_VN_SYMBOL_LENGTH = 2
+MAX_VN_SYMBOL_LENGTH = 4
+
 
 class YahooFinanceQuoteProvider:
     """Retrieve latest stock quotes from Yahoo Finance chart data."""
@@ -22,7 +28,7 @@ class YahooFinanceQuoteProvider:
     _base_url = "https://query1.finance.yahoo.com/v8/finance/chart"
     _vndirect_stock_prices_url = "https://api-finfo.vndirect.com.vn/v4/stock_prices"
     _vndirect_stocks_url = "https://api-finfo.vndirect.com.vn/v4/stocks"
-    _headers = {
+    _headers: ClassVar[dict[str, str]] = {
         "Accept": "application/json",
         "User-Agent": "StockTrace/0.1",
     }
@@ -64,9 +70,9 @@ class YahooFinanceQuoteProvider:
                 )
                 response.raise_for_status()
         except httpx.HTTPStatusError as exc:
-            if exc.response.status_code == 429:
+            if exc.response.status_code == HTTP_TOO_MANY_REQUESTS:
                 raise MarketDataError(f"Price provider is rate-limited for {symbol}.") from exc
-            if exc.response.status_code in {404, 422}:
+            if exc.response.status_code in {HTTP_NOT_FOUND, HTTP_UNPROCESSABLE_ENTITY}:
                 raise QuoteNotFoundError(f"No price found for {symbol}.") from exc
             msg = f"Could not retrieve price for {requested_symbol}."
             raise MarketDataError(msg) from exc
@@ -254,12 +260,15 @@ def _company_name(row: dict[str, Any] | None, fallback: str) -> str:
 
 def _looks_like_vietnam_symbol(symbol: str) -> bool:
     normalized = symbol.strip().upper()
-    return "." not in normalized and normalized.isalpha() and 2 <= len(normalized) <= 4
+    return (
+        "." not in normalized
+        and normalized.isalpha()
+        and MIN_VN_SYMBOL_LENGTH <= len(normalized) <= MAX_VN_SYMBOL_LENGTH
+    )
 
 
 def _candidate_symbols(symbol: str) -> list[str]:
     normalized = symbol.strip().upper()
-    candidates = [normalized]
     if _looks_like_vietnam_symbol(normalized):
-        candidates.append(f"{normalized}.VN")
-    return candidates
+        return [f"{normalized}.VN", normalized]
+    return [normalized]

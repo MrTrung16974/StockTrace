@@ -96,6 +96,7 @@ class Container:
         return SchedulerService(
             quote_handler=self.quote_query_handler(),
             news_handler=self.news_query_handler(),
+            watchlist_service=self.watchlist_service(),
             bot=bot,
             settings=self._settings,
         )

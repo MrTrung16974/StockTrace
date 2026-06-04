@@ -20,6 +20,7 @@ from stocktrace.application.queries.stock_handlers import (
 )
 from stocktrace.application.queries.stock_queries import GetNewsQuery, GetPriceQuery
 from stocktrace.application.services.market_data import NewsArticle, StockQuote
+from stocktrace.application.services.watchlist import WatchlistService
 from stocktrace.infrastructure.config import Settings
 from stocktrace.infrastructure.logging.config import get_logger
 
@@ -49,12 +50,14 @@ class SchedulerService:
         self,
         quote_handler: GetStockQuoteQueryHandler,
         news_handler: GetStockNewsQueryHandler,
+        watchlist_service: WatchlistService,
         bot: TelegramMessageBot,
         settings: Settings,
         scheduler: AsyncIOScheduler | None = None,
     ) -> None:
         self._quote_handler = quote_handler
         self._news_handler = news_handler
+        self._watchlist_service = watchlist_service
         self._bot = bot
         self._settings = settings
         self._timezone = ZoneInfo(settings.scheduler.timezone)
@@ -126,7 +129,12 @@ class SchedulerService:
             self._logger.warning("news_digest_skipped", reason="missing_telegram_chat_id")
             return
 
-        for symbol in self._watchlist_symbols:
+        symbols = await self._watchlist_symbols()
+        if not symbols:
+            self._logger.info("news_digest_skipped", reason="empty_watchlist")
+            return
+
+        for symbol in symbols:
             try:
                 articles = await self._run_with_retry(
                     lambda symbol=symbol: self._news_handler.handle(
@@ -166,9 +174,14 @@ class SchedulerService:
             self._logger.warning("price_alert_skipped", reason="missing_telegram_chat_id")
             return
 
+        symbols = await self._watchlist_symbols()
+        if not symbols:
+            self._logger.info("price_alert_skipped", reason="empty_watchlist")
+            return
+
         pending_fingerprints: dict[str, tuple[Decimal, Decimal]] = {}
         quotes: list[StockQuote] = []
-        for symbol in self._watchlist_symbols:
+        for symbol in symbols:
             try:
                 quote = await self._run_with_retry(
                     lambda symbol=symbol: self._quote_handler.handle(
@@ -199,13 +212,16 @@ class SchedulerService:
     def _chat_id(self) -> str | None:
         return self._settings.telegram.chat_id
 
-    @property
-    def _watchlist_symbols(self) -> list[str]:
+    async def _watchlist_symbols(self) -> list[str]:
+        chat_id = self._chat_id
+        if chat_id is None:
+            return []
+        items = await self._watchlist_service.list_symbols(owner_id=chat_id)
         disabled = {symbol.upper() for symbol in self._settings.scheduler.disabled_symbols}
         return [
-            symbol.upper()
-            for symbol in self._settings.scheduler.watchlist_symbols
-            if symbol.upper() not in disabled
+            item.symbol.upper()
+            for item in items
+            if item.symbol.upper() not in disabled
         ]
 
     async def _run_with_retry(

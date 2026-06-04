@@ -10,6 +10,7 @@ import pytest
 
 from stocktrace.application.queries.stock_queries import GetNewsQuery, GetPriceQuery
 from stocktrace.application.services.market_data import NewsArticle, StockQuote
+from stocktrace.domain.entities.watchlist_item import WatchlistItem
 from stocktrace.infrastructure.config import (
     ProvidersSettings,
     RedisSettings,
@@ -94,6 +95,26 @@ class FakeQuoteHandler:
         )
 
 
+class FakeWatchlistService:
+    """Watchlist service test double."""
+
+    def __init__(self, symbols: list[str] | None = None) -> None:
+        self.symbols = symbols or ["FPT", "VCB"]
+        self.owner_ids: list[str] = []
+
+    async def list_symbols(self, owner_id: str) -> list[WatchlistItem]:
+        self.owner_ids.append(owner_id)
+        return [
+            WatchlistItem(
+                id=f"{owner_id}:{symbol}",
+                owner_id=owner_id,
+                symbol=symbol,
+                created_at=datetime.now(tz=UTC),
+            )
+            for symbol in self.symbols
+        ]
+
+
 def _settings() -> Settings:
     return Settings(
         _env_file=None,
@@ -101,7 +122,6 @@ def _settings() -> Settings:
         redis=RedisSettings(enabled=False),
         telegram=TelegramSettings(chat_id="chat-1"),
         scheduler=SchedulerSettings(
-            watchlist_symbols=["FPT", "VCB"],
             news_symbol_delay_seconds=0,
         ),
     )
@@ -123,6 +143,7 @@ async def test_news_digest_sends_one_message_per_successful_symbol() -> None:
     service = SchedulerService(
         quote_handler=cast(Any, FakeQuoteHandler()),
         news_handler=cast(Any, news_handler),
+        watchlist_service=cast(Any, FakeWatchlistService()),
         bot=cast(Any, bot),
         settings=_settings(),
     )
@@ -145,6 +166,7 @@ async def test_news_digest_does_not_resend_same_article_url() -> None:
     service = SchedulerService(
         quote_handler=cast(Any, FakeQuoteHandler()),
         news_handler=cast(Any, FakeNewsHandler()),
+        watchlist_service=cast(Any, FakeWatchlistService()),
         bot=cast(Any, bot),
         settings=_settings(),
     )
@@ -162,6 +184,7 @@ async def test_price_alert_sends_single_aggregated_message_and_continues_on_erro
     service = SchedulerService(
         quote_handler=cast(Any, quote_handler),
         news_handler=cast(Any, FakeNewsHandler()),
+        watchlist_service=cast(Any, FakeWatchlistService()),
         bot=cast(Any, bot),
         settings=_settings(),
     )
@@ -185,6 +208,7 @@ async def test_price_alert_does_not_resend_unchanged_prices() -> None:
     service = SchedulerService(
         quote_handler=cast(Any, FakeQuoteHandler()),
         news_handler=cast(Any, FakeNewsHandler()),
+        watchlist_service=cast(Any, FakeWatchlistService()),
         bot=cast(Any, bot),
         settings=_settings(),
     )
@@ -204,6 +228,7 @@ async def test_disabled_symbols_are_skipped() -> None:
     service = SchedulerService(
         quote_handler=cast(Any, quote_handler),
         news_handler=cast(Any, FakeNewsHandler()),
+        watchlist_service=cast(Any, FakeWatchlistService()),
         bot=cast(Any, bot),
         settings=settings,
     )
@@ -211,3 +236,22 @@ async def test_disabled_symbols_are_skipped() -> None:
     await service.send_price_alert()
 
     assert [query.symbol for query in quote_handler.queries] == ["FPT"]
+
+
+@pytest.mark.asyncio
+async def test_scheduler_uses_chat_watchlist_from_database() -> None:
+    bot = FakeBot()
+    quote_handler = FakeQuoteHandler()
+    watchlist_service = FakeWatchlistService(symbols=["MBB"])
+    service = SchedulerService(
+        quote_handler=cast(Any, quote_handler),
+        news_handler=cast(Any, FakeNewsHandler()),
+        watchlist_service=cast(Any, watchlist_service),
+        bot=cast(Any, bot),
+        settings=_settings(),
+    )
+
+    await service.send_price_alert()
+
+    assert watchlist_service.owner_ids == ["chat-1"]
+    assert [query.symbol for query in quote_handler.queries] == ["MBB"]
