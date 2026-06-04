@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any, cast
+from zoneinfo import ZoneInfo
 
 import httpx
 
@@ -19,21 +20,58 @@ class YahooFinanceQuoteProvider:
     """Retrieve latest stock quotes from Yahoo Finance chart data."""
 
     _base_url = "https://query1.finance.yahoo.com/v8/finance/chart"
+    _vndirect_stock_prices_url = "https://api-finfo.vndirect.com.vn/v4/stock_prices"
+    _vndirect_stocks_url = "https://api-finfo.vndirect.com.vn/v4/stocks"
+    _headers = {
+        "Accept": "application/json",
+        "User-Agent": "StockTrace/0.1",
+    }
 
     def __init__(self, timeout_seconds: float) -> None:
         self._timeout_seconds = timeout_seconds
 
     async def get_quote(self, symbol: str) -> StockQuote:
         """Return the latest quote for a symbol."""
+        errors: list[str] = []
+        for candidate in _candidate_symbols(symbol):
+            try:
+                return await self._get_quote_for_candidate(candidate, requested_symbol=symbol)
+            except QuoteNotFoundError as exc:
+                errors.append(str(exc))
+            except MarketDataError as exc:
+                errors.append(str(exc))
+
+        if _looks_like_vietnam_symbol(symbol):
+            try:
+                return await self._get_vndirect_quote(symbol)
+            except QuoteNotFoundError as exc:
+                errors.append(str(exc))
+            except MarketDataError as exc:
+                errors.append(str(exc))
+
+        if any("rate-limited" in error for error in errors):
+            raise MarketDataError("Price provider is rate-limited. Please try again later.")
+        raise QuoteNotFoundError(f"No price found for {symbol}.")
+
+    async def _get_quote_for_candidate(self, symbol: str, requested_symbol: str) -> StockQuote:
+        """Return the latest quote for a concrete provider symbol."""
         try:
             async with httpx.AsyncClient(timeout=self._timeout_seconds) as client:
                 response = await client.get(
                     f"{self._base_url}/{symbol}",
                     params={"range": "1d", "interval": "1m"},
+                    headers=self._headers,
                 )
                 response.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 429:
+                raise MarketDataError(f"Price provider is rate-limited for {symbol}.") from exc
+            if exc.response.status_code in {404, 422}:
+                raise QuoteNotFoundError(f"No price found for {symbol}.") from exc
+            msg = f"Could not retrieve price for {requested_symbol}."
+            raise MarketDataError(msg) from exc
         except httpx.HTTPError as exc:
-            msg = f"Could not retrieve price for {symbol}."
+            msg = f"Could not retrieve price for {requested_symbol}."
             raise MarketDataError(msg) from exc
 
         payload = response.json()
@@ -47,9 +85,14 @@ class YahooFinanceQuoteProvider:
         if previous_close is None:
             previous_close = current_price
         change = current_price - previous_close
-        change_percent = (change / previous_close) * Decimal("100") if previous_close != Decimal("0") else Decimal("0")
+        if previous_close != Decimal("0"):
+            change_percent = (change / previous_close) * Decimal("100")
+        else:
+            change_percent = Decimal("0")
 
-        timestamp = _datetime_from_timestamp(metadata.get("regularMarketTime")) or datetime.now(tz=UTC)
+        timestamp = _datetime_from_timestamp(
+            metadata.get("regularMarketTime"),
+        ) or datetime.now(tz=UTC)
         return StockQuote(
             ticker=str(metadata.get("symbol") or symbol).upper(),
             company_name=str(metadata.get("longName") or metadata.get("shortName") or symbol),
@@ -63,6 +106,68 @@ class YahooFinanceQuoteProvider:
             timestamp=timestamp,
             currency=str(metadata.get("currency") or ""),
             source="Yahoo Finance",
+        )
+
+    async def _get_vndirect_quote(self, symbol: str) -> StockQuote:
+        """Return a latest Vietnam stock quote from VNDIRECT public market data."""
+        normalized = symbol.strip().upper()
+        try:
+            async with httpx.AsyncClient(
+                timeout=self._timeout_seconds,
+                headers=self._headers,
+            ) as client:
+                price_response = await client.get(
+                    self._vndirect_stock_prices_url,
+                    params={
+                        "sort": "date:desc",
+                        "q": f"code:{normalized}",
+                        "size": 1,
+                        "page": 1,
+                    },
+                )
+                price_response.raise_for_status()
+
+                company_response = await client.get(
+                    self._vndirect_stocks_url,
+                    params={
+                        "fields": "code,shortName,companyNameEng",
+                        "q": f"code:{normalized}",
+                        "size": 1,
+                    },
+                )
+                company_response.raise_for_status()
+        except httpx.HTTPError as exc:
+            msg = f"Could not retrieve price for {normalized}."
+            raise MarketDataError(msg) from exc
+
+        price_row = _first_data_row(price_response.json(), symbol=normalized)
+        company_row = _first_optional_data_row(company_response.json())
+        current_price = _vnd_price(price_row.get("close"))
+        if current_price is None:
+            raise QuoteNotFoundError(f"No price found for {normalized}.")
+
+        reference_price = _vnd_price(price_row.get("basicPrice")) or current_price
+        change = _vnd_price(price_row.get("change"))
+        if change is None:
+            change = current_price - reference_price
+
+        change_percent = _decimal(price_row.get("pctChange"))
+        if change_percent is None and reference_price != Decimal("0"):
+            change_percent = (change / reference_price) * Decimal("100")
+
+        return StockQuote(
+            ticker=normalized,
+            company_name=_company_name(company_row, fallback=normalized),
+            current_price=current_price,
+            change=change,
+            change_percent=change_percent or Decimal("0"),
+            open_price=_vnd_price(price_row.get("open")) or current_price,
+            high_price=_vnd_price(price_row.get("high")) or current_price,
+            low_price=_vnd_price(price_row.get("low")) or current_price,
+            volume=_int_decimal(price_row.get("nmVolume")),
+            timestamp=_vndirect_timestamp(price_row) or datetime.now(tz=UTC),
+            currency="VND",
+            source="VNDIRECT",
         )
 
 
@@ -80,6 +185,22 @@ def _first_result(payload: object) -> dict[str, Any]:
     return cast(dict[str, Any], result[0])
 
 
+def _first_data_row(payload: object, symbol: str) -> dict[str, Any]:
+    row = _first_optional_data_row(payload)
+    if row is None:
+        raise QuoteNotFoundError(f"No price found for {symbol}.")
+    return row
+
+
+def _first_optional_data_row(payload: object) -> dict[str, Any] | None:
+    if not isinstance(payload, dict):
+        return None
+    data = payload.get("data")
+    if not isinstance(data, list) or not data or not isinstance(data[0], dict):
+        return None
+    return cast(dict[str, Any], data[0])
+
+
 def _decimal(value: object) -> Decimal | None:
     if value is None:
         return None
@@ -93,3 +214,52 @@ def _datetime_from_timestamp(value: object) -> datetime | None:
     if not isinstance(value, int | float):
         return None
     return datetime.fromtimestamp(value, tz=UTC)
+
+
+def _vndirect_timestamp(row: dict[str, Any]) -> datetime | None:
+    date_value = row.get("date")
+    time_value = row.get("time")
+    if not isinstance(date_value, str) or not isinstance(time_value, str):
+        return None
+    try:
+        local_time = datetime.fromisoformat(f"{date_value}T{time_value}")
+    except ValueError:
+        return None
+    return local_time.replace(tzinfo=ZoneInfo("Asia/Ho_Chi_Minh")).astimezone(UTC)
+
+
+def _vnd_price(value: object) -> Decimal | None:
+    amount = _decimal(value)
+    if amount is None:
+        return None
+    return amount * Decimal("1000")
+
+
+def _int_decimal(value: object) -> int:
+    amount = _decimal(value)
+    if amount is None:
+        return 0
+    return int(amount)
+
+
+def _company_name(row: dict[str, Any] | None, fallback: str) -> str:
+    if row is None:
+        return fallback
+    for key in ("companyNameEng", "shortName", "companyName"):
+        value = row.get(key)
+        if value:
+            return str(value)
+    return fallback
+
+
+def _looks_like_vietnam_symbol(symbol: str) -> bool:
+    normalized = symbol.strip().upper()
+    return "." not in normalized and normalized.isalpha() and 2 <= len(normalized) <= 4
+
+
+def _candidate_symbols(symbol: str) -> list[str]:
+    normalized = symbol.strip().upper()
+    candidates = [normalized]
+    if _looks_like_vietnam_symbol(normalized):
+        candidates.append(f"{normalized}.VN")
+    return candidates
