@@ -9,7 +9,11 @@ from typing import Any, cast
 import feedparser
 import httpx
 
-from stocktrace.application.services.market_data import MarketDataError, NewsArticle
+from stocktrace.application.services.market_data import NewsArticle
+from stocktrace.infrastructure.logging.config import get_logger
+
+MIN_VN_SYMBOL_LENGTH = 2
+MAX_VN_SYMBOL_LENGTH = 4
 
 
 class YahooFinanceNewsProvider:
@@ -20,6 +24,7 @@ class YahooFinanceNewsProvider:
 
     def __init__(self, timeout_seconds: float) -> None:
         self._timeout_seconds = timeout_seconds
+        self._logger = get_logger(__name__)
 
     async def get_news(self, symbol: str, limit: int) -> list[NewsArticle]:
         """Return latest news articles for a symbol."""
@@ -43,7 +48,8 @@ class YahooFinanceNewsProvider:
                     params={"s": symbol, "region": "US", "lang": "en-US"},
                 )
                 response.raise_for_status()
-        except httpx.HTTPError:
+        except httpx.HTTPError as exc:
+            self._logger.warning("yahoo_news_fetch_failed", symbol=symbol, error=str(exc))
             return []
 
         return _parse_articles(
@@ -59,16 +65,20 @@ class YahooFinanceNewsProvider:
                 response = await client.get(
                     self._google_feed_url,
                     params={
-                        "q": f"{symbol} stock",
-                        "hl": "en-US",
-                        "gl": "US",
-                        "ceid": "US:en",
+                        "q": (
+                            f'"{symbol}" '
+                            "(cổ phiếu OR chứng khoán OR CafeF OR Vietstock OR "
+                            '"Người Quan Sát" OR VietnamBiz OR VnEconomy OR "Báo Đầu Tư")'
+                        ),
+                        "hl": "vi",
+                        "gl": "VN",
+                        "ceid": "VN:vi",
                     },
                 )
                 response.raise_for_status()
         except httpx.HTTPError as exc:
-            msg = f"Could not retrieve news for {symbol}."
-            raise MarketDataError(msg) from exc
+            self._logger.warning("google_news_fetch_failed", symbol=symbol, error=str(exc))
+            return []
 
         return _parse_articles(
             response.text,
@@ -125,6 +135,10 @@ def _source_name(value: object, fallback: str) -> str:
 def _candidate_symbols(symbol: str) -> list[str]:
     normalized = symbol.strip().upper()
     candidates = [normalized]
-    if "." not in normalized and normalized.isalpha() and 2 <= len(normalized) <= 4:
+    if (
+        "." not in normalized
+        and normalized.isalpha()
+        and MIN_VN_SYMBOL_LENGTH <= len(normalized) <= MAX_VN_SYMBOL_LENGTH
+    ):
         candidates.append(f"{normalized}.VN")
     return candidates

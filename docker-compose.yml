@@ -31,7 +31,7 @@ services:
       POSTGRES_USER: stocktrace
       POSTGRES_PASSWORD: stocktrace
     ports:
-      - "5432:5432"
+      - "${STOCKTRACE_POSTGRES_HOST_PORT:-5433}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     restart: unless-stopped
@@ -45,7 +45,7 @@ services:
     image: redis:7-alpine
     command: ["redis-server", "--appendonly", "yes"]
     ports:
-      - "6379:6379"
+      - "${STOCKTRACE_REDIS_HOST_PORT:-6380}:6379"
     volumes:
       - redis_data:/data
     restart: unless-stopped

@@ -1,0 +1,24 @@
+stock:
+  tracking:
+    symbols:
+      - HPG
+      - FPT
+      - VCB
+      - TCB
+    disabled_symbols: []
+
+  price:
+    enabled: true
+    interval_minutes: 5
+
+  news:
+    enabled: true
+    schedules:
+      - "08:00"
+      - "12:00"
+      - "16:00"
+      - "20:00"
+    limit: 5
+
+telegram:
+  chat_id: "replace-me"

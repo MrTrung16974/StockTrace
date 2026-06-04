@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Awaitable, Callable
 from datetime import datetime
 from decimal import Decimal
 from html import escape
-from typing import Protocol
+from typing import Protocol, TypeVar
 from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -21,6 +22,10 @@ from stocktrace.application.queries.stock_queries import GetNewsQuery, GetPriceQ
 from stocktrace.application.services.market_data import NewsArticle, StockQuote
 from stocktrace.infrastructure.config import Settings
 from stocktrace.infrastructure.logging.config import get_logger
+
+T = TypeVar("T")
+ONE_HOUR_MINUTES = 60
+ONE_DAY_HOURS = 24
 
 
 class TelegramMessageBot(Protocol):
@@ -55,6 +60,8 @@ class SchedulerService:
         self._timezone = ZoneInfo(settings.scheduler.timezone)
         self._scheduler = scheduler or AsyncIOScheduler(timezone=self._timezone)
         self._logger = get_logger(__name__)
+        self._last_price_fingerprints: dict[str, tuple[Decimal, Decimal]] = {}
+        self._sent_news_urls: set[str] = set()
 
     @property
     def is_running(self) -> bool:
@@ -72,29 +79,37 @@ class SchedulerService:
             self._logger.warning("scheduler_skipped", reason="missing_telegram_chat_id")
             return
 
-        self._scheduler.add_job(
-            self.send_news_digest,
-            CronTrigger(
-                hour=",".join(str(hour) for hour in self._settings.scheduler.news_digest_hours),
-                minute=0,
-                timezone=self._timezone,
-            ),
-            id="stocktrace-news-digest",
-            replace_existing=True,
-            max_instances=1,
-            coalesce=True,
-        )
-        self._scheduler.add_job(
-            self.send_price_alert,
-            IntervalTrigger(
-                minutes=self._settings.scheduler.price_alert_interval_minutes,
-                timezone=self._timezone,
-            ),
-            id="stocktrace-price-alert",
-            replace_existing=True,
-            max_instances=1,
-            coalesce=True,
-        )
+        has_job = False
+        if self._settings.scheduler.news_enabled:
+            self._scheduler.add_job(
+                self.send_news_digest,
+                CronTrigger(
+                    hour=",".join(str(hour) for hour in self._settings.scheduler.news_digest_hours),
+                    minute=0,
+                    timezone=self._timezone,
+                ),
+                id="stocktrace-news-digest",
+                replace_existing=True,
+                max_instances=1,
+                coalesce=True,
+            )
+            has_job = True
+        if self._settings.scheduler.price_enabled:
+            self._scheduler.add_job(
+                self.send_price_alert,
+                IntervalTrigger(
+                    minutes=self._settings.scheduler.price_alert_interval_minutes,
+                    timezone=self._timezone,
+                ),
+                id="stocktrace-price-alert",
+                replace_existing=True,
+                max_instances=1,
+                coalesce=True,
+            )
+            has_job = True
+        if not has_job:
+            self._logger.info("scheduler_skipped", reason="all_jobs_disabled")
+            return
         self._scheduler.start()
         self._logger.info("scheduler_started")
 
@@ -113,19 +128,33 @@ class SchedulerService:
 
         for symbol in self._watchlist_symbols:
             try:
-                articles = await self._news_handler.handle(
-                    GetNewsQuery(
-                        symbol=symbol,
-                        limit=self._settings.scheduler.news_digest_limit,
+                articles = await self._run_with_retry(
+                    lambda symbol=symbol: self._news_handler.handle(
+                        GetNewsQuery(
+                            symbol=symbol,
+                            limit=self._settings.scheduler.news_digest_limit,
+                        ),
                     ),
+                    symbol=symbol,
+                    job_name="news_digest",
                 )
-                message = self._build_news_digest_message(symbol, articles)
+                new_articles = self._filter_unsent_articles(articles)
+                if not new_articles:
+                    self._logger.info(
+                        "news_digest_symbol_skipped",
+                        symbol=symbol,
+                        reason="no_new_articles",
+                    )
+                    continue
+
+                message = self._build_news_digest_message(symbol, new_articles)
                 await self._bot.send_message(
                     chat_id=chat_id,
                     text=message,
                     parse_mode="HTML",
                     disable_web_page_preview=True,
                 )
+                self._mark_news_sent(new_articles)
             except Exception as exc:
                 self._logger.error("news_digest_symbol_failed", symbol=symbol, error=str(exc))
             await asyncio.sleep(self._settings.scheduler.news_symbol_delay_seconds)
@@ -137,17 +166,25 @@ class SchedulerService:
             self._logger.warning("price_alert_skipped", reason="missing_telegram_chat_id")
             return
 
+        pending_fingerprints: dict[str, tuple[Decimal, Decimal]] = {}
         quotes: list[StockQuote] = []
         for symbol in self._watchlist_symbols:
             try:
-                quote = await self._quote_handler.handle(GetPriceQuery(symbol=symbol))
-                if quote is not None:
+                quote = await self._run_with_retry(
+                    lambda symbol=symbol: self._quote_handler.handle(
+                        GetPriceQuery(symbol=symbol),
+                    ),
+                    symbol=symbol,
+                    job_name="price_alert",
+                )
+                if quote is not None and self._should_send_price(quote):
                     quotes.append(quote)
+                    pending_fingerprints[quote.ticker.upper()] = _price_fingerprint(quote)
             except Exception as exc:
                 self._logger.error("price_alert_symbol_failed", symbol=symbol, error=str(exc))
 
         if not quotes:
-            self._logger.warning("price_alert_skipped", reason="empty_quote_result")
+            self._logger.info("price_alert_skipped", reason="no_price_change")
             return
 
         await self._bot.send_message(
@@ -156,6 +193,7 @@ class SchedulerService:
             parse_mode="HTML",
             disable_web_page_preview=True,
         )
+        self._last_price_fingerprints.update(pending_fingerprints)
 
     @property
     def _chat_id(self) -> str | None:
@@ -163,7 +201,46 @@ class SchedulerService:
 
     @property
     def _watchlist_symbols(self) -> list[str]:
-        return [symbol.upper() for symbol in self._settings.scheduler.watchlist_symbols]
+        disabled = {symbol.upper() for symbol in self._settings.scheduler.disabled_symbols}
+        return [
+            symbol.upper()
+            for symbol in self._settings.scheduler.watchlist_symbols
+            if symbol.upper() not in disabled
+        ]
+
+    async def _run_with_retry(
+        self,
+        operation: Callable[[], Awaitable[T]],
+        symbol: str,
+        job_name: str,
+    ) -> T:
+        attempts = max(1, self._settings.providers.max_retries + 1)
+        for attempt in range(1, attempts + 1):
+            try:
+                return await operation()
+            except Exception:
+                if attempt >= attempts:
+                    raise
+                self._logger.warning(
+                    "scheduler_job_retrying",
+                    job=job_name,
+                    symbol=symbol,
+                    attempt=attempt,
+                    attempts=attempts,
+                )
+                await asyncio.sleep(min(attempt, 3))
+        raise RuntimeError("retry loop exhausted")
+
+    def _filter_unsent_articles(self, articles: list[NewsArticle]) -> list[NewsArticle]:
+        return [article for article in articles if article.url not in self._sent_news_urls]
+
+    def _mark_news_sent(self, articles: list[NewsArticle]) -> None:
+        self._sent_news_urls.update(article.url for article in articles)
+
+    def _should_send_price(self, quote: StockQuote) -> bool:
+        symbol = quote.ticker.upper()
+        fingerprint = _price_fingerprint(quote)
+        return self._last_price_fingerprints.get(symbol) != fingerprint
 
     def _build_news_digest_message(self, symbol: str, articles: list[NewsArticle]) -> str:
         now = datetime.now(tz=self._timezone)
@@ -200,12 +277,12 @@ def _age_label(published_at: datetime | None, now: datetime) -> str:
         published_at = published_at.replace(tzinfo=ZoneInfo("UTC"))
     published_at = published_at.astimezone(now.tzinfo)
     minutes = max(0, int((now - published_at).total_seconds() // 60))
-    if minutes < 60:
+    if minutes < ONE_HOUR_MINUTES:
         return f"{minutes} phút trước"
-    hours = minutes // 60
-    if hours < 24:
+    hours = minutes // ONE_HOUR_MINUTES
+    if hours < ONE_DAY_HOURS:
         return f"{hours} giờ trước"
-    days = hours // 24
+    days = hours // ONE_DAY_HOURS
     return f"{days} ngày trước"
 
 
@@ -226,3 +303,7 @@ def _trend_icon(value: Decimal) -> str:
     if value < 0:
         return "📉"
     return "➡️"
+
+
+def _price_fingerprint(quote: StockQuote) -> tuple[Decimal, Decimal]:
+    return (quote.current_price, quote.change_percent)

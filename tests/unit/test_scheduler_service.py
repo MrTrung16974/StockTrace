@@ -11,12 +11,16 @@ import pytest
 from stocktrace.application.queries.stock_queries import GetNewsQuery, GetPriceQuery
 from stocktrace.application.services.market_data import NewsArticle, StockQuote
 from stocktrace.infrastructure.config import (
+    ProvidersSettings,
     RedisSettings,
     SchedulerSettings,
     Settings,
     TelegramSettings,
 )
 from stocktrace.infrastructure.scheduler.service import SchedulerService
+
+PRICE_INTERVAL_MINUTES = 5
+NEWS_DIGEST_HOURS = [8, 12, 16, 20]
 
 
 class FakeBot:
@@ -93,6 +97,7 @@ class FakeQuoteHandler:
 def _settings() -> Settings:
     return Settings(
         _env_file=None,
+        providers=ProvidersSettings(max_retries=0),
         redis=RedisSettings(enabled=False),
         telegram=TelegramSettings(chat_id="chat-1"),
         scheduler=SchedulerSettings(
@@ -100,6 +105,15 @@ def _settings() -> Settings:
             news_symbol_delay_seconds=0,
         ),
     )
+
+
+def test_scheduler_settings_defaults_match_expected_schedule() -> None:
+    settings = SchedulerSettings()
+
+    assert settings.price_enabled is True
+    assert settings.news_enabled is True
+    assert settings.price_alert_interval_minutes == PRICE_INTERVAL_MINUTES
+    assert settings.news_digest_hours == NEWS_DIGEST_HOURS
 
 
 @pytest.mark.asyncio
@@ -126,6 +140,22 @@ async def test_news_digest_sends_one_message_per_successful_symbol() -> None:
 
 
 @pytest.mark.asyncio
+async def test_news_digest_does_not_resend_same_article_url() -> None:
+    bot = FakeBot()
+    service = SchedulerService(
+        quote_handler=cast(Any, FakeQuoteHandler()),
+        news_handler=cast(Any, FakeNewsHandler()),
+        bot=cast(Any, bot),
+        settings=_settings(),
+    )
+
+    await service.send_news_digest()
+    await service.send_news_digest()
+
+    assert len(bot.messages) == 1
+
+
+@pytest.mark.asyncio
 async def test_price_alert_sends_single_aggregated_message_and_continues_on_errors() -> None:
     bot = FakeBot()
     quote_handler = FakeQuoteHandler()
@@ -147,3 +177,37 @@ async def test_price_alert_sends_single_aggregated_message_and_continues_on_erro
     assert "FPT" in message["text"]
     assert "125,000" in message["text"]
     assert "+1.21%" in message["text"]
+
+
+@pytest.mark.asyncio
+async def test_price_alert_does_not_resend_unchanged_prices() -> None:
+    bot = FakeBot()
+    service = SchedulerService(
+        quote_handler=cast(Any, FakeQuoteHandler()),
+        news_handler=cast(Any, FakeNewsHandler()),
+        bot=cast(Any, bot),
+        settings=_settings(),
+    )
+
+    await service.send_price_alert()
+    await service.send_price_alert()
+
+    assert len(bot.messages) == 1
+
+
+@pytest.mark.asyncio
+async def test_disabled_symbols_are_skipped() -> None:
+    bot = FakeBot()
+    quote_handler = FakeQuoteHandler()
+    settings = _settings()
+    settings.scheduler.disabled_symbols = ["VCB"]
+    service = SchedulerService(
+        quote_handler=cast(Any, quote_handler),
+        news_handler=cast(Any, FakeNewsHandler()),
+        bot=cast(Any, bot),
+        settings=settings,
+    )
+
+    await service.send_price_alert()
+
+    assert [query.symbol for query in quote_handler.queries] == ["FPT"]

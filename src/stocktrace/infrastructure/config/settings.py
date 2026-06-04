@@ -27,7 +27,7 @@ class AppSettings(BaseModel):
 class ApiSettings(BaseModel):
     """HTTP API settings."""
 
-    host: str = "0.0.0.0"
+    host: str = "0.0.0.0"  # noqa: S104
     port: int = Field(default=8000, ge=1, le=65535)
     cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:8000"])
 
@@ -105,7 +105,10 @@ class SchedulerSettings(BaseModel):
     enabled: bool = True
     timezone: str = "Asia/Ho_Chi_Minh"
     watchlist_symbols: list[str] = Field(default_factory=list)
-    news_digest_hours: list[int] = Field(default_factory=lambda: [7, 12, 19])
+    disabled_symbols: list[str] = Field(default_factory=list)
+    price_enabled: bool = True
+    news_enabled: bool = True
+    news_digest_hours: list[int] = Field(default_factory=lambda: [8, 12, 16, 20])
     price_alert_interval_minutes: int = Field(default=5, ge=1)
     news_digest_limit: int = Field(default=5, ge=1, le=20)
     news_symbol_delay_seconds: float = Field(default=0.5, ge=0)
@@ -114,6 +117,14 @@ class SchedulerSettings(BaseModel):
     @classmethod
     def parse_watchlist_symbols(cls, value: object) -> object:
         """Allow comma-separated watchlists in addition to JSON lists."""
+        if isinstance(value, str):
+            return [symbol.strip().upper() for symbol in value.split(",") if symbol.strip()]
+        return value
+
+    @field_validator("disabled_symbols", mode="before")
+    @classmethod
+    def parse_disabled_symbols(cls, value: object) -> object:
+        """Allow comma-separated disabled symbols in addition to JSON lists."""
         if isinstance(value, str):
             return [symbol.strip().upper() for symbol in value.split(",") if symbol.strip()]
         return value

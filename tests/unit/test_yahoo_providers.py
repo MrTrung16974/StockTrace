@@ -11,6 +11,9 @@ from httpx import Response
 from stocktrace.infrastructure.news.yahoo import YahooFinanceNewsProvider
 from stocktrace.infrastructure.providers.yahoo import YahooFinanceQuoteProvider
 
+HPG_VOLUME = 20_573_500
+YAHOO_CANDIDATE_COUNT = 2
+
 
 @pytest.mark.asyncio
 @respx.mock
@@ -135,7 +138,7 @@ async def test_yahoo_quote_provider_falls_back_to_vndirect_for_vietnam_symbol() 
     assert quote.current_price == Decimal("24150.0")
     assert quote.change == Decimal("450.00")
     assert quote.change_percent == Decimal("1.8987")
-    assert quote.volume == 20573500
+    assert quote.volume == HPG_VOLUME
     assert quote.currency == "VND"
     assert quote.source == "VNDIRECT"
 
@@ -194,9 +197,23 @@ async def test_yahoo_news_provider_falls_back_to_google_news() -> None:
     provider = YahooFinanceNewsProvider(timeout_seconds=1)
     articles = await provider.get_news("HPG", limit=5)
 
-    assert yahoo_route.call_count == 2
+    assert yahoo_route.call_count == YAHOO_CANDIDATE_COUNT
     assert google_route.called
     assert len(articles) == 1
     assert articles[0].ticker == "HPG"
     assert articles[0].title == "HPG steel outlook"
     assert articles[0].source == "Google Publisher"
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_yahoo_news_provider_returns_empty_when_all_sources_fail() -> None:
+    respx.get("https://feeds.finance.yahoo.com/rss/2.0/headline").mock(
+        side_effect=[Response(404), Response(404)],
+    )
+    respx.get("https://news.google.com/rss/search").mock(return_value=Response(503))
+
+    provider = YahooFinanceNewsProvider(timeout_seconds=1)
+    articles = await provider.get_news("MBB", limit=5)
+
+    assert articles == []
