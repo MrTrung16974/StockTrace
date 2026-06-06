@@ -133,48 +133,9 @@ def build_ai_news_section(analysis: StockAnalysisResult) -> str:
 
 def build_full_analysis_message(bundle: AnalysisBundle) -> str:
     """Build the /analysis command response."""
-    symbol = escape(bundle.symbol)
-    lines = [f"📊 PHÂN TÍCH CỔ PHIẾU {symbol}", ""]
+    from stocktrace.infrastructure.telegram.formatters import build_professional_analysis_report
 
-    if bundle.quote is not None:
-        lines.extend(
-            [
-                f"Giá hiện tại:\n{_format_vn_price(bundle.quote.current_price)}",
-                "",
-                f"Biến động:\n{_format_signed_decimal(bundle.quote.change_percent)}%",
-                "",
-                f"Xu hướng:\n{_trend_label(bundle.quote.change_percent)}",
-                "",
-            ],
-        )
-    else:
-        lines.extend(["Giá hiện tại:\nKhông có dữ liệu", "", "Biến động:\nKhông có dữ liệu", ""])
-
-    if bundle.analysis is None:
-        lines.append("🤖 NHẬN ĐỊNH AI")
-        lines.append("")
-        lines.append("Không thể tạo nhận định AI lúc này. Vui lòng thử lại sau.")
-        return "\n".join(lines)
-
-    analysis = bundle.analysis
-    lines.extend(
-        [
-            "🤖 NHẬN ĐỊNH AI",
-            "",
-            f"Tổng quan:\n{escape(analysis.overview)}",
-            "",
-            f"Điểm mạnh:\n{escape(analysis.positives)}",
-            "",
-            f"Rủi ro:\n{escape(analysis.risks)}",
-            "",
-            f"Ngắn hạn:\n{escape(analysis.short_term)}",
-        ],
-    )
-    if analysis.medium_term:
-        lines.extend(["", f"Trung hạn:\n{escape(analysis.medium_term)}"])
-    if analysis.conclusion:
-        lines.extend(["", f"Kết luận:\n{escape(analysis.conclusion)}"])
-    return "\n".join(lines)
+    return build_professional_analysis_report(bundle)
 
 
 def build_scheduler_symbol_section(bundle: AnalysisBundle) -> str:

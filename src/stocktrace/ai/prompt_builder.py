@@ -88,6 +88,17 @@ class PromptBuilder:
         if context.fundamental_data:
             fund_block = "\n".join(f"- {k}: {v}" for k, v in context.fundamental_data.items())
 
+        score_block = ""
+        if context.score:
+            score_block = (
+                f"Điểm tổng thể: {context.score.get('overall_score')}/100 "
+                f"({context.score.get('stars')})\n"
+                f"Kỹ thuật: {context.score.get('technical_score')} | "
+                f"Cơ bản: {context.score.get('fundamental_score')} | "
+                f"Tin tức: {context.score.get('news_score')} | "
+                f"Momentum: {context.score.get('momentum_score')}"
+            )
+
         lines = [
             "Bạn là chuyên gia phân tích chứng khoán Việt Nam cấp cao.",
             "",
@@ -100,6 +111,9 @@ class PromptBuilder:
             "",
             "Phân tích Cơ bản:",
             fund_block,
+            "",
+            "Điểm số AI:",
+            score_block or "Không có dữ liệu",
             "",
             "Tin tức mới nhất:",
             news_block,

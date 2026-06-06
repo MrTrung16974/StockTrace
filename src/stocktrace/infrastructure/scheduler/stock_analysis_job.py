@@ -10,7 +10,7 @@ from stocktrace.application.services.watchlist import WatchlistService
 from stocktrace.infrastructure.config import Settings
 from stocktrace.infrastructure.logging.config import get_logger
 from stocktrace.infrastructure.scheduler.protocols import TelegramMessageBot
-from stocktrace.infrastructure.telegram.messages import build_scheduler_symbol_section
+from stocktrace.infrastructure.telegram.formatters import build_professional_analysis_report
 
 
 class StockAnalysisJob:
@@ -131,5 +131,5 @@ class StockAnalysisJob:
         for index, bundle in enumerate(bundles):
             if index > 0:
                 sections.extend(["---", ""])
-            sections.append(build_scheduler_symbol_section(bundle))
+            sections.append(build_professional_analysis_report(bundle))
         return "\n".join(sections).rstrip()

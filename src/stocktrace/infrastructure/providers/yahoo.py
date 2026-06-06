@@ -144,11 +144,12 @@ class YahooFinanceQuoteProvider:
         
         # Fallback to Yahoo
         yahoo_symbol = f"{symbol.strip().upper()}.VN" if _looks_like_vietnam_symbol(symbol) else symbol.strip().upper()
+        yahoo_range = "1y" if days >= 200 else f"{days}d"
         try:
             async with httpx.AsyncClient(timeout=self._timeout_seconds, headers=self._headers) as client:
                 response = await client.get(
                     f"{self._base_url}/{yahoo_symbol}",
-                    params={"range": f"{days}d", "interval": "1d"},
+                    params={"range": yahoo_range, "interval": "1d"},
                 )
                 response.raise_for_status()
                 payload = response.json()
@@ -181,9 +182,97 @@ class YahooFinanceQuoteProvider:
             return []
 
     async def get_fundamental_data(self, symbol: str) -> FundamentalData:
-        """Return fundamental data for a symbol (currently mocked/limited)."""
+        """Return fundamental and foreign-flow data for a symbol."""
         from stocktrace.application.services.market_data import FundamentalData
-        return FundamentalData()
+
+        normalized = symbol.strip().upper()
+        if _looks_like_vietnam_symbol(normalized):
+            data = await self._get_vndirect_fundamentals(normalized)
+            if data != FundamentalData():
+                return data
+
+        return await self._get_yahoo_fundamentals(normalized)
+
+    async def _get_vndirect_fundamentals(self, symbol: str) -> FundamentalData:
+        from stocktrace.application.services.market_data import FundamentalData
+
+        try:
+            async with httpx.AsyncClient(timeout=self._timeout_seconds, headers=self._headers) as client:
+                ratio_response = await client.get(
+                    "https://api-finfo.vndirect.com.vn/v4/ratios",
+                    params={
+                        "q": f"code:{symbol}",
+                        "size": 1,
+                        "page": 1,
+                        "sort": "reportDate:desc",
+                    },
+                )
+                ratio_response.raise_for_status()
+
+                price_response = await client.get(
+                    self._vndirect_stock_prices_url,
+                    params={
+                        "sort": "date:desc",
+                        "q": f"code:{symbol}",
+                        "size": 1,
+                        "page": 1,
+                    },
+                )
+                price_response.raise_for_status()
+        except httpx.HTTPError:
+            return FundamentalData()
+
+        ratio_row = _first_optional_data_row(ratio_response.json()) or {}
+        price_row = _first_optional_data_row(price_response.json()) or {}
+
+        return FundamentalData(
+            eps=_decimal(ratio_row.get("eps")),
+            pe=_decimal(ratio_row.get("pe")),
+            pb=_decimal(ratio_row.get("pb")),
+            roe=_decimal(ratio_row.get("roe")),
+            roa=_decimal(ratio_row.get("roa")),
+            foreign_buy_vol=_int_optional(
+                price_row.get("frBuyVol") or price_row.get("frBVol") or price_row.get("foreignBuyVolume"),
+            ),
+            foreign_sell_vol=_int_optional(
+                price_row.get("frSellVol") or price_row.get("frSVol") or price_row.get("foreignSellVolume"),
+            ),
+        )
+
+    async def _get_yahoo_fundamentals(self, symbol: str) -> FundamentalData:
+        from stocktrace.application.services.market_data import FundamentalData
+
+        yahoo_symbol = f"{symbol}.VN" if _looks_like_vietnam_symbol(symbol) else symbol
+        try:
+            async with httpx.AsyncClient(timeout=self._timeout_seconds, headers=self._headers) as client:
+                response = await client.get(
+                    f"https://query1.finance.yahoo.com/v10/finance/quoteSummary/{yahoo_symbol}",
+                    params={"modules": "defaultKeyStatistics,summaryDetail,financialData"},
+                )
+                response.raise_for_status()
+        except httpx.HTTPError:
+            return FundamentalData()
+
+        payload = response.json()
+        result = payload.get("quoteSummary", {}).get("result", [])
+        if not result:
+            return FundamentalData()
+
+        stats = result[0].get("defaultKeyStatistics") or {}
+        summary = result[0].get("summaryDetail") or {}
+        financial = result[0].get("financialData") or {}
+
+        def _raw(block: dict, key: str) -> Decimal | None:
+            item = block.get(key) or {}
+            return _decimal(item.get("raw") if isinstance(item, dict) else item)
+
+        return FundamentalData(
+            eps=_raw(stats, "trailingEps"),
+            pe=_raw(summary, "trailingPE"),
+            pb=_raw(stats, "priceToBook"),
+            roe=_raw(financial, "returnOnEquity"),
+            roa=_raw(financial, "returnOnAssets"),
+        )
 
     async def _get_vndirect_quote(self, symbol: str) -> StockQuote:
         """Return a latest Vietnam stock quote from VNDIRECT public market data."""
@@ -316,6 +405,15 @@ def _int_decimal(value: object) -> int:
     amount = _decimal(value)
     if amount is None:
         return 0
+    return int(amount)
+
+
+def _int_optional(value: object) -> int | None:
+    if value is None:
+        return None
+    amount = _decimal(value)
+    if amount is None:
+        return None
     return int(amount)
 
 

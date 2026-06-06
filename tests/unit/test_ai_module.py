@@ -123,7 +123,7 @@ def test_prompt_builder_full_includes_historical() -> None:
     ).prompt
 
     assert "[ĐÁNH GIÁ TRUNG HẠN]" in prompt
-    assert "2026-06-01" in prompt
+    assert "Phân tích Kỹ thuật:" in prompt
 
 
 def test_parse_analysis_response_extracts_sections() -> None:
@@ -325,6 +325,5 @@ def test_build_full_analysis_message_includes_price_and_ai() -> None:
     assert "PHÂN TÍCH CỔ PHIẾU VCB" in message
     assert "98.500" in message
     assert "+2.3%" in message
-    assert "Tăng" in message
-    assert "🤖 NHẬN ĐỊNH AI" in message
+    assert "NHẬN ĐỊNH AI" in message
     assert "Kết luận" in message

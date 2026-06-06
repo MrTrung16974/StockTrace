@@ -73,6 +73,7 @@ class AISettings(BaseModel):
     temperature: float = Field(default=0.3, ge=0, le=1)
     request_timeout_seconds: float = Field(default=30.0, gt=0)
     cache_ttl_seconds: int = Field(default=1800, ge=60)
+    report_cache_ttl_seconds: int = Field(default=300, ge=60)
     translate_news: bool = True
 
     @property

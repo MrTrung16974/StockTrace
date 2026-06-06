@@ -167,8 +167,8 @@ def create_router(
             await message.answer(str(exc))
             return
 
-        if stock_analysis_service is None or not stock_analysis_service.is_enabled:
-            await message.answer("AI analysis is disabled. Enable STOCKTRACE_AI__ENABLED in config.")
+        if stock_analysis_service is None:
+            await message.answer("Analysis service is not configured.")
             return
 
         thinking = await message.answer(f"⏳ Đang phân tích <b>{symbol}</b>...")

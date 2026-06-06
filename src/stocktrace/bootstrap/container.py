@@ -160,9 +160,11 @@ class Container:
                 quote_handler=self.quote_query_handler(),
                 news_handler=self.news_query_handler(),
                 analysis_service=self.analysis_service(),
+                market_data_service=self.market_data_service(),
                 translation_service=self.translation_service(),
                 historical_provider=self.historical_provider(),
-                market_data_service=self.market_data_service(),
+                report_cache=self.ai_cache(),
+                ai_settings=self._settings.ai,
             )
         return self._stock_analysis_service
 
