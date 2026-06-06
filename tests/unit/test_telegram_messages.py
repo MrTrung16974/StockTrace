@@ -32,6 +32,7 @@ def test_build_help_message_mentions_future_commands() -> None:
 
     assert "/add SYMBOL" in message
     assert "/news SYMBOL" in message
+    assert "/analysis SYMBOL" in message
 
 
 def test_build_status_message_uses_settings() -> None:
@@ -39,6 +40,7 @@ def test_build_status_message_uses_settings() -> None:
 
     assert "Environment: test" in message
     assert "Database: SQLite" in message
+    assert "AI enabled: False" in message
 
 
 def test_build_watchlist_message_handles_empty_list() -> None:

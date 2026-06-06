@@ -1,6 +1,7 @@
 """Typed configuration exports."""
 
 from stocktrace.infrastructure.config.settings import (
+    AISettings,
     AppSettings,
     ApiSettings,
     CacheSettings,
@@ -17,6 +18,7 @@ from stocktrace.infrastructure.config.settings import (
 )
 
 __all__ = [
+    "AISettings",
     "AppSettings",
     "ApiSettings",
     "CacheSettings",

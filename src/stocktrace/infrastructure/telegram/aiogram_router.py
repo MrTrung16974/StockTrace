@@ -7,11 +7,15 @@ from aiogram.filters import Command, CommandObject
 from aiogram.types import Message
 
 from stocktrace.application.services.market_data import MarketDataError, MarketDataService
-from stocktrace.application.services.watchlist import InvalidSymbolError, WatchlistService
+from stocktrace.application.services.stock_analysis_service import StockAnalysisService
+from stocktrace.application.services.watchlist import InvalidSymbolError, WatchlistService, normalize_symbol
 from stocktrace.infrastructure.config import Settings
 from stocktrace.infrastructure.telegram.authorization import is_authorized_user, reject_unauthorized
+from stocktrace.ai.models import AnalysisMode
 from stocktrace.infrastructure.telegram.messages import (
+    append_ai_news_section,
     build_added_message,
+    build_full_analysis_message,
     build_help_message,
     build_news_message,
     build_price_message,
@@ -21,11 +25,14 @@ from stocktrace.infrastructure.telegram.messages import (
     build_watchlist_message,
 )
 
+_DEFAULT_NEWS_LIMIT = 5
+
 
 def create_router(
     settings: Settings,
     watchlist_service: WatchlistService,
     market_data_service: MarketDataService,
+    stock_analysis_service: StockAnalysisService | None = None,
 ) -> Router:
     """Create the Telegram command router."""
     router = Router(name="stocktrace-telegram")
@@ -125,12 +132,56 @@ def create_router(
             return
 
         try:
-            articles = await market_data_service.get_news(command.args, limit=5)
+            symbol = normalize_symbol(command.args)
+        except InvalidSymbolError as exc:
+            await message.answer(str(exc))
+            return
+
+        try:
+            if stock_analysis_service is not None and stock_analysis_service.is_enabled:
+                articles, analysis = await stock_analysis_service.fetch_and_analyze_news(
+                    symbol,
+                    limit=_DEFAULT_NEWS_LIMIT,
+                )
+            else:
+                articles = await market_data_service.get_news(command.args, limit=_DEFAULT_NEWS_LIMIT)
+                analysis = None
         except (InvalidSymbolError, MarketDataError) as exc:
             await message.answer(str(exc))
             return
 
-        symbol = command.args.strip().upper() if command.args else ""
-        await message.answer(build_news_message(symbol=symbol, articles=articles))
+        response = build_news_message(symbol=symbol, articles=articles)
+        if analysis is not None:
+            response = append_ai_news_section(response, analysis)
+        await message.answer(response)
+
+    @router.message(Command("analysis"))
+    async def analysis(message: Message, command: CommandObject) -> None:
+        if not is_authorized_user(message.from_user, settings.telegram):
+            await reject_unauthorized(message)
+            return
+
+        try:
+            symbol = normalize_symbol(command.args)
+        except InvalidSymbolError as exc:
+            await message.answer(str(exc))
+            return
+
+        if stock_analysis_service is None or not stock_analysis_service.is_enabled:
+            await message.answer("AI analysis is disabled. Enable STOCKTRACE_AI__ENABLED in config.")
+            return
+
+        thinking = await message.answer(f"⏳ Đang phân tích <b>{symbol}</b>...")
+        try:
+            bundle = await stock_analysis_service.analyze_symbol(
+                symbol,
+                mode=AnalysisMode.FULL,
+                news_limit=_DEFAULT_NEWS_LIMIT,
+            )
+        except (InvalidSymbolError, MarketDataError) as exc:
+            await thinking.edit_text(str(exc))
+            return
+
+        await thinking.edit_text(build_full_analysis_message(bundle))
 
     return router

@@ -1,0 +1,82 @@
+"""AI analysis data models."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import date
+from decimal import Decimal
+from enum import StrEnum
+
+from stocktrace.application.services.market_data import NewsArticle, StockQuote
+
+
+class AnalysisMode(StrEnum):
+    """Analysis depth for prompt and output formatting."""
+
+    NEWS_ONLY = "news_only"
+    FULL = "full"
+
+
+class SentimentLabel(StrEnum):
+    """High-level sentiment derived from news and price context."""
+
+    POSITIVE = "positive"
+    NEUTRAL = "neutral"
+    NEGATIVE = "negative"
+    MIXED = "mixed"
+
+
+@dataclass(frozen=True, slots=True)
+class HistoricalPoint:
+    """Single historical price observation."""
+
+    day: date
+    close: Decimal
+    change_percent: Decimal
+
+
+@dataclass(frozen=True, slots=True)
+class AnalysisContext:
+    """Inputs gathered before building an LLM prompt."""
+
+    symbol: str
+    news: tuple[NewsArticle, ...]
+    mode: AnalysisMode
+    price: StockQuote | None = None
+    historical: tuple[HistoricalPoint, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class LLMRequest:
+    """Normalized request sent to an LLM provider."""
+
+    prompt: str
+    max_tokens: int = 1024
+    temperature: float = 0.3
+    system_prompt: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class LLMResponse:
+    """Normalized response from an LLM provider."""
+
+    content: str
+    model: str
+    latency_ms: float
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class StockAnalysisResult:
+    """Structured stock analysis parsed from LLM output."""
+
+    symbol: str
+    overview: str
+    positives: str
+    risks: str
+    short_term: str
+    sentiment: SentimentLabel
+    medium_term: str | None = None
+    conclusion: str | None = None
+    raw_response: str = ""

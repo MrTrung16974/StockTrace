@@ -14,7 +14,7 @@ from stocktrace.api.routers import health, stocks, system
 from stocktrace.bootstrap.container import Container
 from stocktrace.infrastructure.config import Settings, get_settings
 from stocktrace.infrastructure.logging.config import configure_logging, get_logger
-from stocktrace.infrastructure.telegram import TelegramBotRunner
+from stocktrace.infrastructure.telegram.runner import TelegramBotRunner
 
 
 @asynccontextmanager
@@ -35,6 +35,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         settings=settings,
         watchlist_service=container.watchlist_service(),
         market_data_service=container.market_data_service(),
+        stock_analysis_service=container.stock_analysis_service(),
         scheduler_service_factory=container.scheduler_service,
     )
     await app.state.telegram_runner.start()

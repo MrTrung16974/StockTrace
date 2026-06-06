@@ -9,7 +9,7 @@ from httpx import Response
 
 @respx.mock
 def test_get_quote_endpoint_returns_latest_quote(client) -> None:
-    respx.get("https://query1.finance.yahoo.com/v8/finance/chart/FPT").mock(
+    respx.get(url__regex=r"https://query1\.finance\.yahoo\.com/v8/finance/chart/FPT(\.VN)?").mock(
         return_value=Response(
             200,
             json={
@@ -49,6 +49,9 @@ def test_get_quote_endpoint_returns_latest_quote(client) -> None:
 
 @respx.mock
 def test_get_news_endpoint_returns_articles(client) -> None:
+    respx.get(url__regex=r"https://news\.google\.com/rss/search.*").mock(
+        return_value=Response(200, text="<rss version='2.0'><channel></channel></rss>"),
+    )
     respx.get("https://feeds.finance.yahoo.com/rss/2.0/headline").mock(
         return_value=Response(
             200,

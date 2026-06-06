@@ -6,7 +6,9 @@ from collections.abc import Sequence
 from decimal import Decimal
 from html import escape
 
+from stocktrace.ai.models import StockAnalysisResult
 from stocktrace.application.services.market_data import NewsArticle, StockQuote
+from stocktrace.application.services.stock_analysis_service import AnalysisBundle
 from stocktrace.domain.entities.watchlist_item import WatchlistItem
 from stocktrace.infrastructure.config import Settings
 
@@ -37,6 +39,7 @@ def build_help_message() -> str:
             "/list",
             "/price SYMBOL",
             "/news SYMBOL",
+            "/analysis SYMBOL",
         ],
     )
 
@@ -52,6 +55,7 @@ def build_status_message(settings: Settings) -> str:
             f"Environment: {settings.environment.value}",
             f"Database: {database_backend}",
             f"Redis enabled: {settings.redis.enabled}",
+            f"AI enabled: {settings.ai.enabled}",
             "Telegram: connected",
         ],
     )
@@ -101,6 +105,112 @@ def build_news_message(symbol: str, articles: Sequence[NewsArticle]) -> str:
         url = escape(article.url)
         lines.append(f'{index}. <a href="{url}">{title}</a>')
     return "\n".join(lines)
+
+
+def append_ai_news_section(text: str, analysis: StockAnalysisResult | None) -> str:
+    """Append the AI analysis block after an existing /news message."""
+    if analysis is None:
+        return text
+    return f"{text}\n\n{build_ai_news_section(analysis)}"
+
+
+def build_ai_news_section(analysis: StockAnalysisResult) -> str:
+    """Build the AI analysis section for /news."""
+    return "\n".join(
+        [
+            "🤖 AI ANALYSIS",
+            "",
+            f"Tổng quan:\n{escape(analysis.overview)}",
+            "",
+            f"Điểm tích cực:\n{escape(analysis.positives)}",
+            "",
+            f"Rủi ro:\n{escape(analysis.risks)}",
+            "",
+            f"Đánh giá ngắn hạn:\n{escape(analysis.short_term)}",
+        ],
+    )
+
+
+def build_full_analysis_message(bundle: AnalysisBundle) -> str:
+    """Build the /analysis command response."""
+    symbol = escape(bundle.symbol)
+    lines = [f"📊 PHÂN TÍCH CỔ PHIẾU {symbol}", ""]
+
+    if bundle.quote is not None:
+        lines.extend(
+            [
+                f"Giá hiện tại:\n{_format_vn_price(bundle.quote.current_price)}",
+                "",
+                f"Biến động:\n{_format_signed_decimal(bundle.quote.change_percent)}%",
+                "",
+                f"Xu hướng:\n{_trend_label(bundle.quote.change_percent)}",
+                "",
+            ],
+        )
+    else:
+        lines.extend(["Giá hiện tại:\nKhông có dữ liệu", "", "Biến động:\nKhông có dữ liệu", ""])
+
+    if bundle.analysis is None:
+        lines.append("🤖 NHẬN ĐỊNH AI")
+        lines.append("")
+        lines.append("Không thể tạo nhận định AI lúc này. Vui lòng thử lại sau.")
+        return "\n".join(lines)
+
+    analysis = bundle.analysis
+    lines.extend(
+        [
+            "🤖 NHẬN ĐỊNH AI",
+            "",
+            f"Tổng quan:\n{escape(analysis.overview)}",
+            "",
+            f"Điểm mạnh:\n{escape(analysis.positives)}",
+            "",
+            f"Rủi ro:\n{escape(analysis.risks)}",
+            "",
+            f"Ngắn hạn:\n{escape(analysis.short_term)}",
+        ],
+    )
+    if analysis.medium_term:
+        lines.extend(["", f"Trung hạn:\n{escape(analysis.medium_term)}"])
+    if analysis.conclusion:
+        lines.extend(["", f"Kết luận:\n{escape(analysis.conclusion)}"])
+    return "\n".join(lines)
+
+
+def build_scheduler_symbol_section(bundle: AnalysisBundle) -> str:
+    """Build one symbol section for scheduled AI reports."""
+    lines = [f"<b>{escape(bundle.symbol)}</b>"]
+    if bundle.quote is not None:
+        lines.append(f"Giá: {_format_vn_price(bundle.quote.current_price)}")
+        lines.append(f"Biến động: {_format_signed_decimal(bundle.quote.change_percent)}%")
+
+    if bundle.analysis is None:
+        lines.append("Không có nhận định AI.")
+        return "\n".join(lines)
+
+    analysis = bundle.analysis
+    lines.extend(
+        [
+            "",
+            f"Tổng quan: {escape(analysis.overview)}",
+            f"Điểm mạnh: {escape(analysis.positives)}",
+            f"Rủi ro: {escape(analysis.risks)}",
+            f"Ngắn hạn: {escape(analysis.short_term)}",
+        ],
+    )
+    if analysis.medium_term:
+        lines.append(f"Trung hạn: {escape(analysis.medium_term)}")
+    if analysis.conclusion:
+        lines.append(f"Kết luận: {escape(analysis.conclusion)}")
+    return "\n".join(lines)
+
+
+def _trend_label(change_percent: Decimal) -> str:
+    if change_percent > 0:
+        return "Tăng"
+    if change_percent < 0:
+        return "Giảm"
+    return "Đi ngang"
 
 
 def _format_decimal(value: Decimal) -> str:

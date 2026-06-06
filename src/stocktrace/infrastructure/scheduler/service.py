@@ -7,7 +7,7 @@ from collections.abc import Awaitable, Callable
 from datetime import datetime
 from decimal import Decimal
 from html import escape
-from typing import Protocol, TypeVar
+from typing import TypeVar
 from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -23,24 +23,12 @@ from stocktrace.application.services.market_data import NewsArticle, StockQuote
 from stocktrace.application.services.watchlist import WatchlistService
 from stocktrace.infrastructure.config import Settings
 from stocktrace.infrastructure.logging.config import get_logger
+from stocktrace.infrastructure.scheduler.protocols import TelegramMessageBot
+from stocktrace.infrastructure.scheduler.stock_analysis_job import StockAnalysisJob
 
 T = TypeVar("T")
 ONE_HOUR_MINUTES = 60
 ONE_DAY_HOURS = 24
-
-
-class TelegramMessageBot(Protocol):
-    """Minimal Telegram bot contract used by scheduled jobs."""
-
-    async def send_message(
-        self,
-        chat_id: str,
-        text: str,
-        parse_mode: str | None = None,
-        disable_web_page_preview: bool | None = None,
-    ) -> object:
-        """Send a Telegram message."""
-        ...
 
 
 class SchedulerService:
@@ -54,12 +42,14 @@ class SchedulerService:
         bot: TelegramMessageBot,
         settings: Settings,
         scheduler: AsyncIOScheduler | None = None,
+        analysis_job: StockAnalysisJob | None = None,
     ) -> None:
         self._quote_handler = quote_handler
         self._news_handler = news_handler
         self._watchlist_service = watchlist_service
         self._bot = bot
         self._settings = settings
+        self._analysis_job = analysis_job
         self._timezone = ZoneInfo(settings.scheduler.timezone)
         self._scheduler = scheduler or AsyncIOScheduler(timezone=self._timezone)
         self._logger = get_logger(__name__)
@@ -105,6 +95,32 @@ class SchedulerService:
                     timezone=self._timezone,
                 ),
                 id="stocktrace-price-alert",
+                replace_existing=True,
+                max_instances=1,
+                coalesce=True,
+            )
+            has_job = True
+        if self._settings.scheduler.analysis_enabled and self._analysis_job is not None:
+            self._scheduler.add_job(
+                self._analysis_job.run_morning_report,
+                CronTrigger(
+                    hour=self._settings.scheduler.morning_report_hour,
+                    minute=0,
+                    timezone=self._timezone,
+                ),
+                id="stocktrace-ai-morning-report",
+                replace_existing=True,
+                max_instances=1,
+                coalesce=True,
+            )
+            self._scheduler.add_job(
+                self._analysis_job.run_evening_report,
+                CronTrigger(
+                    hour=self._settings.scheduler.evening_report_hour,
+                    minute=0,
+                    timezone=self._timezone,
+                ),
+                id="stocktrace-ai-evening-report",
                 replace_existing=True,
                 max_instances=1,
                 coalesce=True,

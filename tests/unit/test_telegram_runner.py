@@ -8,7 +8,7 @@ from pydantic import SecretStr
 from stocktrace.bootstrap.container import Container
 from stocktrace.infrastructure.config import TelegramSettings
 from stocktrace.infrastructure.config.test import load_test_settings
-from stocktrace.infrastructure.telegram import TelegramBotRunner
+from stocktrace.infrastructure.telegram.runner import TelegramBotRunner
 
 
 @pytest.mark.asyncio
