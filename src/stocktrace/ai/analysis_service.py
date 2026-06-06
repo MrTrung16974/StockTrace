@@ -27,6 +27,10 @@ _SECTION_MARKERS = {
     "risks": ("[RỦI RO]", "Rủi ro:"),
     "short_term": ("[ĐÁNH GIÁ NGẮN HẠN]", "Đánh giá ngắn hạn:", "Ngắn hạn:"),
     "medium_term": ("[ĐÁNH GIÁ TRUNG HẠN]", "Đánh giá trung hạn:", "Trung hạn:"),
+    "positive_scenario": ("[KỊCH BẢN TÍCH CỰC]", "Kịch bản tích cực:"),
+    "neutral_scenario": ("[KỊCH BẢN TRUNG LẬP]", "Kịch bản trung lập:"),
+    "negative_scenario": ("[KỊCH BẢN TIÊU CỰC]", "Kịch bản tiêu cực:"),
+    "recommendation": ("[KHUYẾN NGHỊ]", "Khuyến nghị:"),
     "conclusion": ("[KẾT LUẬN]", "Kết luận:"),
 }
 
@@ -162,6 +166,18 @@ def parse_analysis_response(
     positives = sections.get("positives", "").strip() or "Chưa có đánh giá cụ thể."
     risks = sections.get("risks", "").strip() or "Chưa có rủi ro nổi bật."
     short_term = sections.get("short_term", "").strip() or "Theo dõi thêm diễn biến thị trường."
+    
+    recommendation_block = sections.get("recommendation", "")
+    action = None
+    confidence = None
+    if "MUA" in recommendation_block.upper(): action = "MUA"
+    elif "BÁN" in recommendation_block.upper() or "BAN" in recommendation_block.upper(): action = "BÁN"
+    elif "GIỮ" in recommendation_block.upper() or "GIU" in recommendation_block.upper(): action = "GIỮ"
+    elif "QUAN SÁT" in recommendation_block.upper() or "QUAN SAT" in recommendation_block.upper(): action = "QUAN SÁT"
+    else: action = "KHÔNG RÕ"
+
+    conf_match = re.search(r"(\d+)%", recommendation_block)
+    if conf_match: confidence = conf_match.group(1) + "%"
 
     return StockAnalysisResult(
         symbol=symbol,
@@ -172,6 +188,12 @@ def parse_analysis_response(
         sentiment=_infer_sentiment(overview, positives, risks),
         medium_term=sections.get("medium_term") if mode == AnalysisMode.FULL else None,
         conclusion=sections.get("conclusion") if mode == AnalysisMode.FULL else None,
+        positive_scenario=sections.get("positive_scenario"),
+        neutral_scenario=sections.get("neutral_scenario"),
+        negative_scenario=sections.get("negative_scenario"),
+        recommendation_action=action,
+        recommendation_confidence=confidence,
+        recommendation_reasons=recommendation_block,
         raw_response=content,
     )
 

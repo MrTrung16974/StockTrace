@@ -40,12 +40,14 @@ class StockAnalysisService:
         analysis_service: AnalysisService,
         translation_service: TranslationService | None = None,
         historical_provider: HistoricalProvider | None = None,
+        market_data_service=None,
     ) -> None:
         self._quote_handler = quote_handler
         self._news_handler = news_handler
         self._analysis_service = analysis_service
         self._translation_service = translation_service
         self._historical_provider = historical_provider
+        self._market_data_service = market_data_service
         self._logger = get_logger(__name__)
 
     @property
@@ -68,6 +70,48 @@ class StockAnalysisService:
         )
         articles = await self._maybe_translate(normalized, articles)
         historical = await self._safe_get_historical(normalized)
+        
+        technical_indicators = None
+        fundamental_data = None
+        score = None
+        
+        if self._market_data_service is not None:
+            try:
+                hist_prices = await self._market_data_service.get_historical_prices(normalized, days=200)
+                if hist_prices:
+                    from stocktrace.application.services.technical_analysis_service import TechnicalAnalysisService
+                    tech_service = TechnicalAnalysisService()
+                    technical_indicators = tech_service.analyze(hist_prices).__dict__
+            except Exception as e:
+                self._logger.warning("ai_technical_analysis_failed", symbol=normalized, error=str(e))
+                
+            try:
+                fund_data = await self._market_data_service.get_fundamental_data(normalized)
+                if fund_data:
+                    from stocktrace.application.services.fundamental_analysis_service import FundamentalAnalysisService
+                    fund_service = FundamentalAnalysisService()
+                    fundamental_data = fund_service.analyze(fund_data)
+            except Exception as e:
+                self._logger.warning("ai_fundamental_analysis_failed", symbol=normalized, error=str(e))
+                
+            try:
+                if technical_indicators and fundamental_data is not None:
+                    from stocktrace.application.services.stock_score_service import StockScoreService
+                    from stocktrace.application.services.technical_analysis_service import TechnicalIndicators
+                    score_service = StockScoreService()
+                    # Determine liquidity status from technical indicators
+                    liquidity = "Thanh khoản trung bình"
+                    # Determine news sentiment
+                    news_text = " ".join(a.title for a in articles).lower()
+                    sentiment = "Trung lập"
+                    if any(w in news_text for w in ["tăng", "lãi", "tích cực"]): sentiment = "Tích cực"
+                    elif any(w in news_text for w in ["giảm", "lỗ", "tiêu cực"]): sentiment = "Tiêu cực"
+                    
+                    tech_ind = TechnicalIndicators(**technical_indicators)
+                    stock_score = score_service.calculate_score(tech_ind, fundamental_data, sentiment, liquidity)
+                    score = stock_score.__dict__
+            except Exception as e:
+                self._logger.warning("ai_score_calculation_failed", symbol=normalized, error=str(e))
 
         analysis = None
         if self.is_enabled:
@@ -77,6 +121,9 @@ class StockAnalysisService:
                 mode=mode,
                 price=quote,
                 historical=tuple(historical),
+                technical_indicators=technical_indicators,
+                fundamental_data=fundamental_data,
+                score=score,
             )
             analysis = await self._analysis_service.analyze(context)
 

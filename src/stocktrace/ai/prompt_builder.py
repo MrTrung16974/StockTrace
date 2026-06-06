@@ -70,35 +70,58 @@ class PromptBuilder:
         price_block = self._format_price_block(context.price)
         news_block = self._format_news_block(context.news)
         historical_block = self._format_historical_block(context.historical)
+        
+        tech_block = "Không có dữ liệu"
+        if context.technical_indicators:
+            t = context.technical_indicators
+            tech_block = (
+                f"- RSI: {t.get('rsi')}\n"
+                f"- MACD: {t.get('macd')} (Signal: {t.get('macd_signal')}, Hist: {t.get('macd_hist')})\n"
+                f"- EMA20: {t.get('ema20')} | EMA50: {t.get('ema50')} | EMA200: {t.get('ema200')}\n"
+                f"- Bollinger Bands: Upper {t.get('bb_upper')}, Lower {t.get('bb_lower')}\n"
+                f"- Xu hướng: Ngắn hạn ({t.get('short_term_trend')}), Trung hạn ({t.get('mid_term_trend')}), Dài hạn ({t.get('long_term_trend')})\n"
+                f"- Hỗ trợ: {t.get('support')} | Kháng cự: {t.get('resistance')}\n"
+                f"- Tín hiệu: {t.get('signal')}"
+            )
+            
+        fund_block = "Không có dữ liệu"
+        if context.fundamental_data:
+            fund_block = "\n".join(f"- {k}: {v}" for k, v in context.fundamental_data.items())
 
         lines = [
-            "Bạn là chuyên gia phân tích chứng khoán Việt Nam.",
+            "Bạn là chuyên gia phân tích chứng khoán Việt Nam cấp cao.",
             "",
             f"Hãy phân tích mã cổ phiếu: {context.symbol}",
             "",
             price_block,
             "",
-            "Tin tức:",
+            "Phân tích Kỹ thuật:",
+            tech_block,
+            "",
+            "Phân tích Cơ bản:",
+            fund_block,
+            "",
+            "Tin tức mới nhất:",
             news_block,
         ]
-        if historical_block:
-            lines.extend(["", "Dữ liệu lịch sử:", historical_block])
 
         lines.extend(
             [
                 "",
                 "Yêu cầu:",
-                "- Trả lời bằng tiếng Việt.",
-                "- Không quá 500 từ.",
-                "- Dùng đúng các header sau (mỗi header trên một dòng riêng):",
+                "- Trả lời bằng tiếng Việt chuyên nghiệp.",
+                "- Không quá 800 từ.",
+                "- BẮT BUỘC Dùng đúng các header sau (mỗi header trên một dòng riêng):",
                 "[TỔNG QUAN]",
                 "[ĐIỂM TÍCH CỰC]",
                 "[RỦI RO]",
                 "[ĐÁNH GIÁ NGẮN HẠN]",
                 "[ĐÁNH GIÁ TRUNG HẠN]",
-                "[KẾT LUẬN]",
-                "- Không cam kết lợi nhuận.",
-                "- Không khuyến nghị mua bán tuyệt đối.",
+                "[KỊCH BẢN TÍCH CỰC]",
+                "[KỊCH BẢN TRUNG LẬP]",
+                "[KỊCH BẢN TIÊU CỰC]",
+                "[KHUYẾN NGHỊ]",
+                "- Header [KHUYẾN NGHỊ] phải bao gồm hành động (MUA/BÁN/GIỮ/QUAN SÁT), độ tin cậy %, và 3 lý do chính.",
             ],
         )
         return "\n".join(lines)

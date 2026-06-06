@@ -44,6 +44,9 @@ class AnalysisContext:
     mode: AnalysisMode
     price: StockQuote | None = None
     historical: tuple[HistoricalPoint, ...] = ()
+    technical_indicators: dict | None = None
+    fundamental_data: dict | None = None
+    score: dict | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,7 +54,7 @@ class LLMRequest:
     """Normalized request sent to an LLM provider."""
 
     prompt: str
-    max_tokens: int = 1024
+    max_tokens: int = 1500
     temperature: float = 0.3
     system_prompt: str | None = None
 
@@ -79,4 +82,13 @@ class StockAnalysisResult:
     sentiment: SentimentLabel
     medium_term: str | None = None
     conclusion: str | None = None
+    
+    # New AI requested fields
+    positive_scenario: str | None = None
+    neutral_scenario: str | None = None
+    negative_scenario: str | None = None
+    recommendation_action: str | None = None
+    recommendation_confidence: str | None = None
+    recommendation_reasons: str | None = None
+    
     raw_response: str = ""

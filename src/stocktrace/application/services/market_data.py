@@ -48,6 +48,27 @@ class NewsArticle:
     published_at: datetime | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class HistoricalPrice:
+    """Historical price point."""
+    date: datetime
+    open: Decimal
+    high: Decimal
+    low: Decimal
+    close: Decimal
+    volume: int
+
+@dataclass(frozen=True, slots=True)
+class FundamentalData:
+    """Fundamental financial data for a stock."""
+    eps: Decimal | None = None
+    pe: Decimal | None = None
+    pb: Decimal | None = None
+    roe: Decimal | None = None
+    roa: Decimal | None = None
+    foreign_buy_vol: int | None = None
+    foreign_sell_vol: int | None = None
+
 class QuoteProvider(Protocol):
     """Port for retrieving quote data."""
 
@@ -55,6 +76,13 @@ class QuoteProvider(Protocol):
         """Return the latest quote for a symbol."""
         ...
 
+    async def get_historical_prices(self, symbol: str, days: int = 365) -> list[HistoricalPrice]:
+        """Return historical prices for a symbol."""
+        ...
+
+    async def get_fundamental_data(self, symbol: str) -> FundamentalData:
+        """Return fundamental data for a symbol."""
+        ...
 
 class NewsProvider(Protocol):
     """Port for retrieving stock news."""
@@ -80,3 +108,13 @@ class MarketDataService:
         """Validate a symbol and return latest related news."""
         symbol = normalize_symbol(raw_symbol)
         return await self._news_provider.get_news(symbol=symbol, limit=limit)
+
+    async def get_historical_prices(self, raw_symbol: str | None, days: int = 365) -> list[HistoricalPrice]:
+        """Validate a symbol and return historical prices."""
+        symbol = normalize_symbol(raw_symbol)
+        return await self._quote_provider.get_historical_prices(symbol, days)
+
+    async def get_fundamental_data(self, raw_symbol: str | None) -> FundamentalData:
+        """Validate a symbol and return fundamental data."""
+        symbol = normalize_symbol(raw_symbol)
+        return await self._quote_provider.get_fundamental_data(symbol)

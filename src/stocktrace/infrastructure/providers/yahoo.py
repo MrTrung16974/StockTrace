@@ -114,6 +114,77 @@ class YahooFinanceQuoteProvider:
             source="Yahoo Finance",
         )
 
+    async def get_historical_prices(self, symbol: str, days: int = 365) -> list[HistoricalPrice]:
+        """Return historical prices for a symbol."""
+        from stocktrace.application.services.market_data import HistoricalPrice
+        if _looks_like_vietnam_symbol(symbol):
+            normalized = symbol.strip().upper()
+            try:
+                async with httpx.AsyncClient(timeout=self._timeout_seconds, headers=self._headers) as client:
+                    response = await client.get(
+                        self._vndirect_stock_prices_url,
+                        params={"sort": "date:desc", "q": f"code:{normalized}", "size": days, "page": 1},
+                    )
+                    response.raise_for_status()
+                    data = response.json().get("data", [])
+                    result = []
+                    for row in data:
+                        date_val = _vndirect_timestamp(row) or datetime.now(tz=UTC)
+                        result.append(HistoricalPrice(
+                            date=date_val,
+                            open=_vnd_price(row.get("open")) or Decimal("0"),
+                            high=_vnd_price(row.get("high")) or Decimal("0"),
+                            low=_vnd_price(row.get("low")) or Decimal("0"),
+                            close=_vnd_price(row.get("close")) or Decimal("0"),
+                            volume=_int_decimal(row.get("nmVolume"))
+                        ))
+                    return sorted(result, key=lambda x: x.date)
+            except Exception:
+                pass
+        
+        # Fallback to Yahoo
+        yahoo_symbol = f"{symbol.strip().upper()}.VN" if _looks_like_vietnam_symbol(symbol) else symbol.strip().upper()
+        try:
+            async with httpx.AsyncClient(timeout=self._timeout_seconds, headers=self._headers) as client:
+                response = await client.get(
+                    f"{self._base_url}/{yahoo_symbol}",
+                    params={"range": f"{days}d", "interval": "1d"},
+                )
+                response.raise_for_status()
+                payload = response.json()
+                result = payload.get("chart", {}).get("result", [])
+                if not result:
+                    return []
+                timestamps = result[0].get("timestamp", [])
+                indicators = result[0].get("indicators", {}).get("quote", [{}])[0]
+                opens = indicators.get("open", [])
+                highs = indicators.get("high", [])
+                lows = indicators.get("low", [])
+                closes = indicators.get("close", [])
+                volumes = indicators.get("volume", [])
+                
+                hist_prices = []
+                for i, ts in enumerate(timestamps):
+                    if closes[i] is None:
+                        continue
+                    dt = datetime.fromtimestamp(ts, tz=UTC)
+                    hist_prices.append(HistoricalPrice(
+                        date=dt,
+                        open=_decimal(opens[i]) or Decimal("0"),
+                        high=_decimal(highs[i]) or Decimal("0"),
+                        low=_decimal(lows[i]) or Decimal("0"),
+                        close=_decimal(closes[i]) or Decimal("0"),
+                        volume=int(volumes[i] or 0)
+                    ))
+                return sorted(hist_prices, key=lambda x: x.date)
+        except Exception:
+            return []
+
+    async def get_fundamental_data(self, symbol: str) -> FundamentalData:
+        """Return fundamental data for a symbol (currently mocked/limited)."""
+        from stocktrace.application.services.market_data import FundamentalData
+        return FundamentalData()
+
     async def _get_vndirect_quote(self, symbol: str) -> StockQuote:
         """Return a latest Vietnam stock quote from VNDIRECT public market data."""
         normalized = symbol.strip().upper()

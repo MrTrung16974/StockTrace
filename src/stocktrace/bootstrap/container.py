@@ -162,6 +162,7 @@ class Container:
                 analysis_service=self.analysis_service(),
                 translation_service=self.translation_service(),
                 historical_provider=self.historical_provider(),
+                market_data_service=self.market_data_service(),
             )
         return self._stock_analysis_service
 
