@@ -174,7 +174,7 @@ class SchedulerService:
             self._logger.info("scheduler_stopped")
 
     async def send_news_digest(self) -> None:
-        """Send one news digest message per watchlist symbol."""
+        """Send one news digest message per watchlist symbol (async fanout)."""
         chat_id = self._chat_id
         if chat_id is None:
             self._logger.warning("news_digest_skipped", reason="missing_telegram_chat_id")
@@ -185,18 +185,32 @@ class SchedulerService:
             self._logger.info("news_digest_skipped", reason="empty_watchlist")
             return
 
-        for symbol in symbols:
-            try:
+        # Limit concurrency so we don't hammer the provider
+        semaphore = asyncio.Semaphore(5)
+
+        async def _fetch_news(symbol: str) -> tuple[str, list[NewsArticle]]:
+            async with semaphore:
                 articles = await self._run_with_retry(
-                    lambda symbol=symbol: self._news_handler.handle(
-                        GetNewsQuery(
-                            symbol=symbol,
-                            limit=self._settings.scheduler.news_digest_limit,
-                        ),
+                    lambda s=symbol: self._news_handler.handle(
+                        GetNewsQuery(symbol=s, limit=self._settings.scheduler.news_digest_limit)
                     ),
                     symbol=symbol,
                     job_name="news_digest",
                 )
+                return symbol, articles
+
+        results = await asyncio.gather(
+            *[_fetch_news(sym) for sym in symbols],
+            return_exceptions=True,
+        )
+
+        delay = self._settings.scheduler.news_symbol_delay_seconds
+        for item in results:
+            if isinstance(item, BaseException):
+                self._logger.error("news_digest_symbol_failed", error=str(item))
+                continue
+            symbol, articles = item
+            try:
                 new_articles = self._filter_unsent_articles(articles)
                 if not new_articles:
                     self._logger.info(
@@ -205,7 +219,6 @@ class SchedulerService:
                         reason="no_new_articles",
                     )
                     continue
-
                 message = self._build_news_digest_message(symbol, new_articles)
                 await self._bot.send_message(
                     chat_id=chat_id,
@@ -214,12 +227,13 @@ class SchedulerService:
                     disable_web_page_preview=True,
                 )
                 self._mark_news_sent(new_articles)
+                if delay > 0:
+                    await asyncio.sleep(delay)
             except Exception as exc:
-                self._logger.error("news_digest_symbol_failed", symbol=symbol, error=str(exc))
-            await asyncio.sleep(self._settings.scheduler.news_symbol_delay_seconds)
+                self._logger.error("news_digest_send_failed", symbol=symbol, error=str(exc))
 
     async def send_price_alert(self) -> None:
-        """Send a single price board message for all watchlist symbols."""
+        """Send a single price board message for all watchlist symbols (async fanout)."""
         now = datetime.now(tz=self._timezone)
         if not is_vn_market_open(now, timezone=self._timezone):
             self._logger.info("price_alert_skipped", reason="market_closed")
@@ -235,20 +249,25 @@ class SchedulerService:
             self._logger.info("price_alert_skipped", reason="empty_watchlist")
             return
 
-        quotes: list[StockQuote] = []
-        for symbol in symbols:
-            try:
-                quote = await self._run_with_retry(
-                    lambda symbol=symbol: self._quote_handler.handle(
-                        GetPriceQuery(symbol=symbol),
-                    ),
+        # Fetch all symbols concurrently — latency = max(individual latencies)
+        results = await asyncio.gather(
+            *[
+                self._run_with_retry(
+                    lambda s=symbol: self._quote_handler.handle(GetPriceQuery(symbol=s)),
                     symbol=symbol,
                     job_name="price_alert",
                 )
-                if quote is not None:
-                    quotes.append(quote)
-            except Exception as exc:
-                self._logger.error("price_alert_symbol_failed", symbol=symbol, error=str(exc))
+                for symbol in symbols
+            ],
+            return_exceptions=True,
+        )
+
+        quotes: list[StockQuote] = []
+        for symbol, result in zip(symbols, results, strict=False):
+            if isinstance(result, BaseException):
+                self._logger.error("price_alert_symbol_failed", symbol=symbol, error=str(result))
+            elif result is not None:
+                quotes.append(result)
 
         if not quotes:
             self._logger.info("price_alert_skipped", reason="no_quotes")

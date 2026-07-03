@@ -179,6 +179,16 @@ class SchedulerSettings(BaseModel):
         return value
 
 
+class ObservabilitySettings(BaseModel):
+    """Observability stack settings."""
+
+    prometheus_enabled: bool = True
+    prometheus_path: str = "/metrics"
+    otel_enabled: bool = False
+    otel_endpoint: str = "http://localhost:4317"
+    otel_service_name: str = "stocktrace-api"
+
+
 class LoggingSettings(BaseModel):
     """Structured logging settings."""
 
@@ -220,6 +230,8 @@ class Settings(BaseSettings):
     scheduler: SchedulerSettings = Field(default_factory=SchedulerSettings)
     ai: AISettings = Field(default_factory=AISettings)
     logging: LoggingSettings = Field(default_factory=LoggingSettings)
+    observability: ObservabilitySettings = Field(default_factory=ObservabilitySettings)
+
 
     @model_validator(mode="after")
     def validate_production_secrets(self) -> Settings:

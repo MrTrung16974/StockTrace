@@ -21,7 +21,12 @@ from stocktrace.infrastructure.telegram.runner import TelegramBotRunner
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Manage application startup and shutdown lifecycle."""
     settings = app.state.settings if hasattr(app.state, "settings") else get_settings()
-    configure_logging(settings.logging)
+    configure_logging(
+        settings.logging,
+        service_name=settings.app.name,
+        service_version=settings.app.version,
+        environment=settings.environment.value,
+    )
     logger = get_logger(__name__)
     logger.info("application_starting", environment=settings.environment)
     app.state.settings = settings
@@ -49,7 +54,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 def create_app(settings: Settings | None = None) -> FastAPI:
     """Create a configured FastAPI application."""
     app_settings = settings or get_settings()
-    configure_logging(app_settings.logging)
+    configure_logging(
+        app_settings.logging,
+        service_name=app_settings.app.name,
+        service_version=app_settings.app.version,
+        environment=app_settings.environment.value,
+    )
 
     app = FastAPI(
         title=app_settings.app.name,
@@ -73,4 +83,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(health.router)
     app.include_router(system.router)
     app.include_router(stocks.router)
+
+    # Prometheus /metrics endpoint — only if enabled
+    if app_settings.observability.prometheus_enabled:
+        from prometheus_client import make_asgi_app  # noqa: PLC0415
+
+        metrics_app = make_asgi_app()
+        app.mount(app_settings.observability.prometheus_path, metrics_app)
+
     return app
