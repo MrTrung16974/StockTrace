@@ -12,6 +12,7 @@ from aiogram.enums import ParseMode
 from aiogram.utils.token import TokenValidationError
 
 from stocktrace.application.services.market_data import MarketDataService
+from stocktrace.application.services.market_analysis_service import MarketAnalysisService
 from stocktrace.application.services.stock_analysis_service import StockAnalysisService
 from stocktrace.application.services.watchlist import WatchlistService
 from stocktrace.infrastructure.config import Settings
@@ -29,12 +30,14 @@ class TelegramBotRunner:
         watchlist_service: WatchlistService,
         market_data_service: MarketDataService,
         stock_analysis_service: StockAnalysisService | None = None,
+        market_analysis_service: MarketAnalysisService | None = None,
         scheduler_service_factory: Callable[[Bot], SchedulerService] | None = None,
     ) -> None:
         self._settings = settings
         self._watchlist_service = watchlist_service
         self._market_data_service = market_data_service
         self._stock_analysis_service = stock_analysis_service
+        self._market_analysis_service = market_analysis_service
         self._scheduler_service_factory = scheduler_service_factory
         self._scheduler_service: SchedulerService | None = None
         self._logger = get_logger(__name__)
@@ -83,6 +86,7 @@ class TelegramBotRunner:
                 self._watchlist_service,
                 self._market_data_service,
                 self._stock_analysis_service,
+                self._market_analysis_service,
             ),
         )
 

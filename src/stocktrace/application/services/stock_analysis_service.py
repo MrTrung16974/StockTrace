@@ -18,7 +18,13 @@ from stocktrace.application.services.liquidity_analysis_service import (
     LiquidityAnalysisService,
     LiquidityAssessment,
 )
-from stocktrace.application.services.market_data import FundamentalData, MarketDataService, NewsArticle, StockQuote
+from stocktrace.application.services.market_data import (
+    FundamentalData,
+    HistoricalPrice,
+    MarketDataService,
+    NewsArticle,
+    StockQuote,
+)
 from stocktrace.application.services.news_analysis_service import NewsAnalysisService, NewsSentimentResult
 from stocktrace.application.services.stock_score_service import StockScore, StockScoreService
 from stocktrace.application.services.technical_analysis_service import (
@@ -49,6 +55,7 @@ class AnalysisBundle:
     liquidity: LiquidityAssessment | None = None
     news_sentiment: NewsSentimentResult | None = None
     score: StockScore | None = None
+    price_history: tuple[HistoricalPrice, ...] = ()
 
 
 class StockAnalysisService:
@@ -162,6 +169,7 @@ class StockAnalysisService:
             liquidity=liquidity,
             news_sentiment=news_sentiment,
             score=score,
+            price_history=tuple(hist_prices),
         )
         await self._set_cached_report(cache_key, bundle)
         return bundle
@@ -295,6 +303,7 @@ def _bundle_to_cache(bundle: AnalysisBundle) -> str:
         "liquidity": asdict(bundle.liquidity) if bundle.liquidity else None,
         "news_sentiment": asdict(bundle.news_sentiment) if bundle.news_sentiment else None,
         "score": asdict(bundle.score) if bundle.score else None,
+        "price_history": [_historical_price_to_dict(item) for item in bundle.price_history],
     }
     return json.dumps(payload, ensure_ascii=False, default=str)
 
@@ -312,6 +321,7 @@ def _bundle_from_cache(payload: str) -> AnalysisBundle:
         liquidity=_liquidity_from_dict(data.get("liquidity")),
         news_sentiment=_news_sentiment_from_dict(data.get("news_sentiment")),
         score=_score_from_dict(data.get("score")),
+        price_history=tuple(_historical_price_from_dict(item) for item in data.get("price_history", [])),
     )
 
 
@@ -445,3 +455,28 @@ def _score_from_dict(data: dict | None) -> StockScore | None:
     if not data:
         return None
     return StockScore(**data)
+
+
+def _historical_price_to_dict(point: HistoricalPrice) -> dict:
+    return {
+        "date": point.date.isoformat(),
+        "open": str(point.open),
+        "high": str(point.high),
+        "low": str(point.low),
+        "close": str(point.close),
+        "volume": point.volume,
+    }
+
+
+def _historical_price_from_dict(data: dict) -> HistoricalPrice:
+    from datetime import datetime
+    from decimal import Decimal
+
+    return HistoricalPrice(
+        date=datetime.fromisoformat(data["date"]),
+        open=Decimal(data["open"]),
+        high=Decimal(data["high"]),
+        low=Decimal(data["low"]),
+        close=Decimal(data["close"]),
+        volume=int(data["volume"]),
+    )

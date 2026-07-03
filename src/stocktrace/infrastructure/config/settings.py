@@ -73,6 +73,7 @@ class AISettings(BaseModel):
     temperature: float = Field(default=0.3, ge=0, le=1)
     request_timeout_seconds: float = Field(default=30.0, gt=0)
     cache_ttl_seconds: int = Field(default=1800, ge=60)
+    market_cache_ttl_seconds: int = Field(default=1800, ge=60)
     report_cache_ttl_seconds: int = Field(default=300, ge=60)
     translate_news: bool = True
 
@@ -142,13 +143,16 @@ class SchedulerSettings(BaseModel):
     price_enabled: bool = True
     news_enabled: bool = True
     news_digest_hours: list[int] = Field(default_factory=lambda: [8, 12, 16, 20])
-    price_alert_interval_minutes: int = Field(default=5, ge=1)
+    price_alert_interval_minutes: int = Field(default=1, ge=1)
     news_digest_limit: int = Field(default=5, ge=1, le=20)
     news_symbol_delay_seconds: float = Field(default=0.5, ge=0)
     analysis_enabled: bool = False
     analysis_symbols: list[str] = Field(default_factory=list)
     morning_report_hour: int = Field(default=8, ge=0, le=23)
     evening_report_hour: int = Field(default=20, ge=0, le=23)
+    market_analysis_enabled: bool = False
+    market_morning_report_hour: int = Field(default=7, ge=0, le=23)
+    market_evening_report_hour: int = Field(default=19, ge=0, le=23)
 
     @field_validator("watchlist_symbols", mode="before")
     @classmethod

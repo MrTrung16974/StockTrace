@@ -9,7 +9,7 @@ stock:
 
   price:
     enabled: true
-    interval_minutes: 5
+    interval_minutes: 1
 
   news:
     enabled: true

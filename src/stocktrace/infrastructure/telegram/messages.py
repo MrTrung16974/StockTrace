@@ -7,6 +7,7 @@ from decimal import Decimal
 from html import escape
 
 from stocktrace.ai.models import StockAnalysisResult
+from stocktrace.application.services.market_analysis_service import MarketAnalysisBundle
 from stocktrace.application.services.market_data import NewsArticle, StockQuote
 from stocktrace.application.services.stock_analysis_service import AnalysisBundle
 from stocktrace.domain.entities.watchlist_item import WatchlistItem
@@ -40,6 +41,7 @@ def build_help_message() -> str:
             "/price SYMBOL",
             "/news SYMBOL",
             "/analysis SYMBOL",
+            "/market - market analysis",
         ],
     )
 
@@ -136,6 +138,13 @@ def build_full_analysis_message(bundle: AnalysisBundle) -> str:
     from stocktrace.infrastructure.telegram.formatters import build_professional_analysis_report
 
     return build_professional_analysis_report(bundle)
+
+
+def build_market_message(bundle: MarketAnalysisBundle) -> str:
+    """Build the /market command response."""
+    from stocktrace.infrastructure.telegram.formatters import build_market_analysis_report
+
+    return build_market_analysis_report(bundle)
 
 
 def build_scheduler_symbol_section(bundle: AnalysisBundle) -> str:

@@ -14,6 +14,7 @@ from stocktrace.application.queries.stock_handlers import (
     GetStockQuoteQueryHandler,
 )
 from stocktrace.application.services.health import HealthCheckService
+from stocktrace.application.services.market_analysis_service import MarketAnalysisService
 from stocktrace.application.services.market_data import MarketDataService
 from stocktrace.application.services.stock_analysis_service import StockAnalysisService
 from stocktrace.application.services.watchlist import WatchlistService
@@ -31,6 +32,7 @@ from stocktrace.infrastructure.db.session import SessionManager
 from stocktrace.infrastructure.news.yahoo import YahooFinanceNewsProvider
 from stocktrace.infrastructure.providers.yahoo import YahooFinanceQuoteProvider
 from stocktrace.infrastructure.providers.yahoo_historical import YahooHistoricalProvider
+from stocktrace.infrastructure.scheduler.market_analysis_job import MarketAnalysisJob
 from stocktrace.infrastructure.scheduler.protocols import TelegramMessageBot
 from stocktrace.infrastructure.scheduler.service import SchedulerService
 from stocktrace.infrastructure.scheduler.stock_analysis_job import StockAnalysisJob
@@ -50,6 +52,7 @@ class Container:
         self._analysis_service: AnalysisService | None = None
         self._translation_service: TranslationService | None = None
         self._stock_analysis_service: StockAnalysisService | None = None
+        self._market_analysis_service: MarketAnalysisService | None = None
         self._historical_provider: YahooHistoricalProvider | None = None
 
     def health_service(self) -> HealthCheckService:
@@ -177,6 +180,23 @@ class Container:
             settings=self._settings,
         )
 
+    def market_analysis_service(self) -> MarketAnalysisService:
+        """Build the market analysis application service."""
+        if self._market_analysis_service is None:
+            self._market_analysis_service = MarketAnalysisService(
+                analysis_service=self.analysis_service(),
+                market_data_service=self.market_data_service(),
+            )
+        return self._market_analysis_service
+
+    def market_analysis_job(self, bot: TelegramMessageBot) -> MarketAnalysisJob:
+        """Build scheduled market analysis jobs."""
+        return MarketAnalysisJob(
+            service=self.market_analysis_service(),
+            bot=bot,
+            settings=self._settings,
+        )
+
     def scheduler_service(self, bot: TelegramMessageBot) -> SchedulerService:
         """Build the scheduled Telegram job service."""
         return SchedulerService(
@@ -185,7 +205,8 @@ class Container:
             watchlist_service=self.watchlist_service(),
             bot=bot,
             settings=self._settings,
-            analysis_job=self.stock_analysis_job(bot),
+            stock_analysis_job=self.stock_analysis_job(bot),
+            market_analysis_job=self.market_analysis_job(bot),
         )
 
     async def dispose(self) -> None:

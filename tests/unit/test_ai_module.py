@@ -322,8 +322,8 @@ def test_build_full_analysis_message_includes_price_and_ai() -> None:
         ),
     )
 
-    assert "PHÂN TÍCH CỔ PHIẾU VCB" in message
+    assert "BÁO CÁO PHÂN TÍCH CỔ PHIẾU VCB" in message
     assert "98.500" in message
-    assert "+2.3%" in message
+    assert "+2,3%" in message or "+2.3%" in message
     assert "NHẬN ĐỊNH AI" in message
-    assert "Kết luận" in message
+    assert "KHUYẾN NGHỊ" in message

@@ -15,6 +15,7 @@ class AnalysisMode(StrEnum):
 
     NEWS_ONLY = "news_only"
     FULL = "full"
+    MARKET = "market"
 
 
 class SentimentLabel(StrEnum):
@@ -47,6 +48,16 @@ class AnalysisContext:
     technical_indicators: dict | None = None
     fundamental_data: dict | None = None
     score: dict | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class MarketAnalysisContext:
+    """Inputs gathered for market-level LLM prompt."""
+
+    indices: dict[str, StockQuote | None]
+    sectors: dict[str, StockQuote | None]
+    international: dict[str, StockQuote | None]
+    news: tuple[NewsArticle, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,4 +102,21 @@ class StockAnalysisResult:
     recommendation_confidence: str | None = None
     recommendation_reasons: str | None = None
     
+    raw_response: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class MarketAnalysisResult:
+    """Structured market analysis parsed from LLM output."""
+
+    overview: str
+    sentiment: SentimentLabel
+    positive_sectors: str
+    negative_sectors: str
+    cash_flow: str
+    international_impact: str
+    short_term: str
+    medium_term: str
+    risks: str
+    conclusion: str
     raw_response: str = ""

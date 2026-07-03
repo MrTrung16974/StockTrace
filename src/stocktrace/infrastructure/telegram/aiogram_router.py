@@ -6,17 +6,21 @@ from aiogram import Router
 from aiogram.filters import Command, CommandObject
 from aiogram.types import Message
 
+from stocktrace.application.services.market_analysis_service import MarketAnalysisService
 from stocktrace.application.services.market_data import MarketDataError, MarketDataService
 from stocktrace.application.services.stock_analysis_service import StockAnalysisService
 from stocktrace.application.services.watchlist import InvalidSymbolError, WatchlistService, normalize_symbol
 from stocktrace.infrastructure.config import Settings
+from stocktrace.infrastructure.logging.config import get_logger
 from stocktrace.infrastructure.telegram.authorization import is_authorized_user, reject_unauthorized
+from stocktrace.infrastructure.telegram.delivery import deliver_html_messages
 from stocktrace.ai.models import AnalysisMode
 from stocktrace.infrastructure.telegram.messages import (
     append_ai_news_section,
     build_added_message,
     build_full_analysis_message,
     build_help_message,
+    build_market_message,
     build_news_message,
     build_price_message,
     build_removed_message,
@@ -33,9 +37,11 @@ def create_router(
     watchlist_service: WatchlistService,
     market_data_service: MarketDataService,
     stock_analysis_service: StockAnalysisService | None = None,
+    market_analysis_service: MarketAnalysisService | None = None,
 ) -> Router:
     """Create the Telegram command router."""
     router = Router(name="stocktrace-telegram")
+    logger = get_logger(__name__)
 
     @router.message(Command("start"))
     async def start(message: Message) -> None:
@@ -182,6 +188,39 @@ def create_router(
             await thinking.edit_text(str(exc))
             return
 
-        await thinking.edit_text(build_full_analysis_message(bundle))
+        try:
+            report = build_full_analysis_message(bundle)
+            await deliver_html_messages(thinking, report)
+        except Exception as exc:
+            logger.error("analysis_delivery_failed", symbol=symbol, error=str(exc))
+            await thinking.edit_text(
+                f"Không thể gửi báo cáo phân tích cho <b>{symbol}</b>. Vui lòng thử lại sau.",
+            )
+
+    @router.message(Command("market", "market_analysis"))
+    async def market_analysis(message: Message) -> None:
+        if not is_authorized_user(message.from_user, settings.telegram):
+            await reject_unauthorized(message)
+            return
+
+        if market_analysis_service is None:
+            await message.answer("Market analysis service is not configured.")
+            return
+
+        thinking = await message.answer("⏳ Đang phân tích thị trường...")
+        try:
+            bundle = await market_analysis_service.analyze_market(news_limit=_DEFAULT_NEWS_LIMIT)
+        except Exception as exc:
+            await thinking.edit_text(str(exc))
+            return
+
+        try:
+            report = build_market_message(bundle)
+            await deliver_html_messages(thinking, report)
+        except Exception as exc:
+            logger.error("market_analysis_delivery_failed", error=str(exc))
+            await thinking.edit_text(
+                "Không thể gửi báo cáo phân tích thị trường. Vui lòng thử lại sau.",
+            )
 
     return router

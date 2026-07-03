@@ -23,7 +23,10 @@ from stocktrace.application.services.market_data import NewsArticle, StockQuote
 from stocktrace.application.services.watchlist import WatchlistService
 from stocktrace.infrastructure.config import Settings
 from stocktrace.infrastructure.logging.config import get_logger
+from stocktrace.infrastructure.scheduler.market_hours import is_vn_market_open
 from stocktrace.infrastructure.scheduler.protocols import TelegramMessageBot
+from stocktrace.infrastructure.scheduler.market_analysis_job import MarketAnalysisJob
+from stocktrace.infrastructure.scheduler.price_alert_job import PriceAlertJob
 from stocktrace.infrastructure.scheduler.stock_analysis_job import StockAnalysisJob
 
 T = TypeVar("T")
@@ -42,18 +45,21 @@ class SchedulerService:
         bot: TelegramMessageBot,
         settings: Settings,
         scheduler: AsyncIOScheduler | None = None,
-        analysis_job: StockAnalysisJob | None = None,
+        stock_analysis_job: StockAnalysisJob | None = None,
+        market_analysis_job: MarketAnalysisJob | None = None,
+        price_alert_job: PriceAlertJob | None = None,
     ) -> None:
         self._quote_handler = quote_handler
         self._news_handler = news_handler
         self._watchlist_service = watchlist_service
         self._bot = bot
         self._settings = settings
-        self._analysis_job = analysis_job
+        self._stock_analysis_job = stock_analysis_job
+        self._market_analysis_job = market_analysis_job
+        self._price_alert_job = price_alert_job
         self._timezone = ZoneInfo(settings.scheduler.timezone)
         self._scheduler = scheduler or AsyncIOScheduler(timezone=self._timezone)
         self._logger = get_logger(__name__)
-        self._last_price_fingerprints: dict[str, tuple[Decimal, Decimal]] = {}
         self._sent_news_urls: set[str] = set()
 
     @property
@@ -87,9 +93,9 @@ class SchedulerService:
                 coalesce=True,
             )
             has_job = True
-        if self._settings.scheduler.price_enabled:
+        if self._price_alert_job is not None:
             self._scheduler.add_job(
-                self.send_price_alert,
+                self._price_alert_job.run,
                 IntervalTrigger(
                     minutes=self._settings.scheduler.price_alert_interval_minutes,
                     timezone=self._timezone,
@@ -100,9 +106,9 @@ class SchedulerService:
                 coalesce=True,
             )
             has_job = True
-        if self._settings.scheduler.analysis_enabled and self._analysis_job is not None:
+        if self._stock_analysis_job is not None:
             self._scheduler.add_job(
-                self._analysis_job.run_morning_report,
+                self._stock_analysis_job.run_morning_report,
                 CronTrigger(
                     hour=self._settings.scheduler.morning_report_hour,
                     minute=0,
@@ -114,13 +120,42 @@ class SchedulerService:
                 coalesce=True,
             )
             self._scheduler.add_job(
-                self._analysis_job.run_evening_report,
+                self._stock_analysis_job.run_evening_report,
                 CronTrigger(
                     hour=self._settings.scheduler.evening_report_hour,
                     minute=0,
                     timezone=self._timezone,
                 ),
                 id="stocktrace-ai-evening-report",
+                replace_existing=True,
+                max_instances=1,
+                coalesce=True,
+            )
+            has_job = True
+
+        if self._market_analysis_job is not None:
+            self._scheduler.add_job(
+                self._market_analysis_job.run_morning_report,
+                CronTrigger(
+                    hour=self._settings.scheduler.market_morning_report_hour,
+                    minute=0,
+                    day_of_week="mon-fri",
+                    timezone=self._timezone,
+                ),
+                id="stocktrace-market-morning",
+                replace_existing=True,
+                max_instances=1,
+                coalesce=True,
+            )
+            self._scheduler.add_job(
+                self._market_analysis_job.run_evening_report,
+                CronTrigger(
+                    hour=self._settings.scheduler.market_evening_report_hour,
+                    minute=0,
+                    day_of_week="mon-fri",
+                    timezone=self._timezone,
+                ),
+                id="stocktrace-market-evening",
                 replace_existing=True,
                 max_instances=1,
                 coalesce=True,
@@ -185,6 +220,11 @@ class SchedulerService:
 
     async def send_price_alert(self) -> None:
         """Send a single price board message for all watchlist symbols."""
+        now = datetime.now(tz=self._timezone)
+        if not is_vn_market_open(now, timezone=self._timezone):
+            self._logger.info("price_alert_skipped", reason="market_closed")
+            return
+
         chat_id = self._chat_id
         if chat_id is None:
             self._logger.warning("price_alert_skipped", reason="missing_telegram_chat_id")
@@ -195,7 +235,6 @@ class SchedulerService:
             self._logger.info("price_alert_skipped", reason="empty_watchlist")
             return
 
-        pending_fingerprints: dict[str, tuple[Decimal, Decimal]] = {}
         quotes: list[StockQuote] = []
         for symbol in symbols:
             try:
@@ -206,23 +245,21 @@ class SchedulerService:
                     symbol=symbol,
                     job_name="price_alert",
                 )
-                if quote is not None and self._should_send_price(quote):
+                if quote is not None:
                     quotes.append(quote)
-                    pending_fingerprints[quote.ticker.upper()] = _price_fingerprint(quote)
             except Exception as exc:
                 self._logger.error("price_alert_symbol_failed", symbol=symbol, error=str(exc))
 
         if not quotes:
-            self._logger.info("price_alert_skipped", reason="no_price_change")
+            self._logger.info("price_alert_skipped", reason="no_quotes")
             return
 
         await self._bot.send_message(
             chat_id=chat_id,
-            text=self._build_price_alert_message(quotes),
+            text=self._build_price_alert_message(quotes, now=now),
             parse_mode="HTML",
             disable_web_page_preview=True,
         )
-        self._last_price_fingerprints.update(pending_fingerprints)
 
     @property
     def _chat_id(self) -> str | None:
@@ -269,11 +306,6 @@ class SchedulerService:
     def _mark_news_sent(self, articles: list[NewsArticle]) -> None:
         self._sent_news_urls.update(article.url for article in articles)
 
-    def _should_send_price(self, quote: StockQuote) -> bool:
-        symbol = quote.ticker.upper()
-        fingerprint = _price_fingerprint(quote)
-        return self._last_price_fingerprints.get(symbol) != fingerprint
-
     def _build_news_digest_message(self, symbol: str, articles: list[NewsArticle]) -> str:
         now = datetime.now(tz=self._timezone)
         lines = [f"📰 Tin tức {now:%H:%M} — {escape(symbol.upper())}", ""]
@@ -290,8 +322,7 @@ class SchedulerService:
             lines.append("")
         return "\n".join(lines).rstrip()
 
-    def _build_price_alert_message(self, quotes: list[StockQuote]) -> str:
-        now = datetime.now(tz=self._timezone)
+    def _build_price_alert_message(self, quotes: list[StockQuote], *, now: datetime) -> str:
         lines = [f"📊 Bảng giá — {now:%H:%M}", ""]
         for quote in quotes:
             lines.append(
@@ -337,5 +368,3 @@ def _trend_icon(value: Decimal) -> str:
     return "➡️"
 
 
-def _price_fingerprint(quote: StockQuote) -> tuple[Decimal, Decimal]:
-    return (quote.current_price, quote.change_percent)

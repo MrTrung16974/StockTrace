@@ -36,6 +36,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         watchlist_service=container.watchlist_service(),
         market_data_service=container.market_data_service(),
         stock_analysis_service=container.stock_analysis_service(),
+        market_analysis_service=container.market_analysis_service(),
         scheduler_service_factory=container.scheduler_service,
     )
     await app.state.telegram_runner.start()

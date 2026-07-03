@@ -5,6 +5,8 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any, cast
+from unittest.mock import patch
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -20,8 +22,9 @@ from stocktrace.infrastructure.config import (
 )
 from stocktrace.infrastructure.scheduler.service import SchedulerService
 
-PRICE_INTERVAL_MINUTES = 5
+PRICE_INTERVAL_MINUTES = 1
 NEWS_DIGEST_HOURS = [8, 12, 16, 20]
+MARKET_OPEN_TIME = datetime(2026, 6, 8, 10, 0, tzinfo=ZoneInfo("Asia/Ho_Chi_Minh"))
 
 
 class FakeBot:
@@ -189,7 +192,11 @@ async def test_price_alert_sends_single_aggregated_message_and_continues_on_erro
         settings=_settings(),
     )
 
-    await service.send_price_alert()
+    with patch(
+        "stocktrace.infrastructure.scheduler.service.datetime",
+    ) as mock_datetime:
+        mock_datetime.now.return_value = MARKET_OPEN_TIME
+        await service.send_price_alert()
 
     assert [query.symbol for query in quote_handler.queries] == ["FPT", "VCB"]
     assert len(bot.messages) == 1
@@ -203,7 +210,7 @@ async def test_price_alert_sends_single_aggregated_message_and_continues_on_erro
 
 
 @pytest.mark.asyncio
-async def test_price_alert_does_not_resend_unchanged_prices() -> None:
+async def test_price_alert_sends_every_run_during_market_hours() -> None:
     bot = FakeBot()
     service = SchedulerService(
         quote_handler=cast(Any, FakeQuoteHandler()),
@@ -213,10 +220,37 @@ async def test_price_alert_does_not_resend_unchanged_prices() -> None:
         settings=_settings(),
     )
 
-    await service.send_price_alert()
-    await service.send_price_alert()
+    with patch(
+        "stocktrace.infrastructure.scheduler.service.datetime",
+    ) as mock_datetime:
+        mock_datetime.now.return_value = MARKET_OPEN_TIME
+        await service.send_price_alert()
+        await service.send_price_alert()
 
-    assert len(bot.messages) == 1
+    assert len(bot.messages) == 2
+
+
+@pytest.mark.asyncio
+async def test_price_alert_skipped_when_market_closed() -> None:
+    bot = FakeBot()
+    quote_handler = FakeQuoteHandler()
+    service = SchedulerService(
+        quote_handler=cast(Any, quote_handler),
+        news_handler=cast(Any, FakeNewsHandler()),
+        watchlist_service=cast(Any, FakeWatchlistService()),
+        bot=cast(Any, bot),
+        settings=_settings(),
+    )
+
+    closed_time = datetime(2026, 6, 8, 12, 0, tzinfo=ZoneInfo("Asia/Ho_Chi_Minh"))
+    with patch(
+        "stocktrace.infrastructure.scheduler.service.datetime",
+    ) as mock_datetime:
+        mock_datetime.now.return_value = closed_time
+        await service.send_price_alert()
+
+    assert len(bot.messages) == 0
+    assert quote_handler.queries == []
 
 
 @pytest.mark.asyncio
@@ -233,7 +267,11 @@ async def test_disabled_symbols_are_skipped() -> None:
         settings=settings,
     )
 
-    await service.send_price_alert()
+    with patch(
+        "stocktrace.infrastructure.scheduler.service.datetime",
+    ) as mock_datetime:
+        mock_datetime.now.return_value = MARKET_OPEN_TIME
+        await service.send_price_alert()
 
     assert [query.symbol for query in quote_handler.queries] == ["FPT"]
 
@@ -251,7 +289,11 @@ async def test_scheduler_uses_chat_watchlist_from_database() -> None:
         settings=_settings(),
     )
 
-    await service.send_price_alert()
+    with patch(
+        "stocktrace.infrastructure.scheduler.service.datetime",
+    ) as mock_datetime:
+        mock_datetime.now.return_value = MARKET_OPEN_TIME
+        await service.send_price_alert()
 
     assert watchlist_service.owner_ids == ["chat-1"]
     assert [query.symbol for query in quote_handler.queries] == ["MBB"]
