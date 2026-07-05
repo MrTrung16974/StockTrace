@@ -42,6 +42,16 @@ def build_help_message() -> str:
             "/news SYMBOL",
             "/analysis SYMBOL",
             "/market - market analysis",
+            "",
+            "Financial Analysis:",
+            "/financial SYMBOL PERIOD (e.g. FPT 1Y)",
+            "/report SYMBOL",
+            "/valuation SYMBOL",
+            "/score SYMBOL",
+            "/roe SYMBOL",
+            "/debt SYMBOL",
+            "/cashflow SYMBOL",
+            "/compare SYMBOL1 SYMBOL2",
         ],
     )
 

@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from stocktrace.api.middleware.request_timing import RequestTimingMiddleware
 from stocktrace.api.middleware.security import ApiSecurityMiddleware
-from stocktrace.api.routers import health, stocks, system
+from stocktrace.api.routers import financial, health, stocks, system
 from stocktrace.bootstrap.container import Container
 from stocktrace.infrastructure.config import Settings, get_settings
 from stocktrace.infrastructure.logging.config import configure_logging, get_logger
@@ -42,6 +42,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         market_data_service=container.market_data_service(),
         stock_analysis_service=container.stock_analysis_service(),
         market_analysis_service=container.market_analysis_service(),
+        financial_analysis_service=container.financial_analysis_service(),
         scheduler_service_factory=container.scheduler_service,
     )
     await app.state.telegram_runner.start()
@@ -83,6 +84,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(health.router)
     app.include_router(system.router)
     app.include_router(stocks.router)
+    app.include_router(financial.router)
 
     # Prometheus /metrics endpoint — only if enabled
     if app_settings.observability.prometheus_enabled:

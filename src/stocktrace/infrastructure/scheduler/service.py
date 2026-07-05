@@ -25,6 +25,7 @@ from stocktrace.infrastructure.config import Settings
 from stocktrace.infrastructure.logging.config import get_logger
 from stocktrace.infrastructure.scheduler.market_hours import is_vn_market_open
 from stocktrace.infrastructure.scheduler.protocols import TelegramMessageBot
+from stocktrace.infrastructure.scheduler.financial_job import FinancialAnalysisJob
 from stocktrace.infrastructure.scheduler.market_analysis_job import MarketAnalysisJob
 from stocktrace.infrastructure.scheduler.price_alert_job import PriceAlertJob
 from stocktrace.infrastructure.scheduler.stock_analysis_job import StockAnalysisJob
@@ -47,6 +48,7 @@ class SchedulerService:
         scheduler: AsyncIOScheduler | None = None,
         stock_analysis_job: StockAnalysisJob | None = None,
         market_analysis_job: MarketAnalysisJob | None = None,
+        financial_analysis_job: FinancialAnalysisJob | None = None,
         price_alert_job: PriceAlertJob | None = None,
     ) -> None:
         self._quote_handler = quote_handler
@@ -56,6 +58,7 @@ class SchedulerService:
         self._settings = settings
         self._stock_analysis_job = stock_analysis_job
         self._market_analysis_job = market_analysis_job
+        self._financial_analysis_job = financial_analysis_job
         self._price_alert_job = price_alert_job
         self._timezone = ZoneInfo(settings.scheduler.timezone)
         self._scheduler = scheduler or AsyncIOScheduler(timezone=self._timezone)
@@ -161,6 +164,34 @@ class SchedulerService:
                 coalesce=True,
             )
             has_job = True
+
+        if self._financial_analysis_job is not None:
+            self._scheduler.add_job(
+                self._financial_analysis_job.sync_financial_statements,
+                CronTrigger(day_of_week="sun", hour=2, minute=0, timezone=self._timezone),
+                id="stocktrace-financial-weekly-sync",
+                replace_existing=True,
+                max_instances=1,
+                coalesce=True,
+            )
+            self._scheduler.add_job(
+                self._financial_analysis_job.recalculate_valuations,
+                CronTrigger(day=1, hour=3, minute=0, timezone=self._timezone),
+                id="stocktrace-valuation-monthly",
+                replace_existing=True,
+                max_instances=1,
+                coalesce=True,
+            )
+            self._scheduler.add_job(
+                self._financial_analysis_job.refresh_quarterly_reports,
+                CronTrigger(month="1,4,7,10", day=15, hour=4, minute=0, timezone=self._timezone),
+                id="stocktrace-financial-quarterly",
+                replace_existing=True,
+                max_instances=1,
+                coalesce=True,
+            )
+            has_job = True
+
         if not has_job:
             self._logger.info("scheduler_skipped", reason="all_jobs_disabled")
             return

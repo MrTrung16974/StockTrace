@@ -129,3 +129,67 @@ def provider_circuit_opened(provider: str) -> DomainEvent:
         provider,
         {"state": "OPEN"},
     )
+
+
+def financial_score_improved(
+    symbol: str,
+    score: float,
+    recommendation: str,
+    reasons: list[str],
+) -> DomainEvent:
+    """Financial score improved for a symbol."""
+    return DomainEvent.create(
+        "TRACE_FINANCIAL",
+        symbol,
+        {
+            "score": score,
+            "recommendation": recommendation,
+            "reasons": reasons,
+            "alert_type": "score_improved",
+        },
+    )
+
+
+def valuation_alert(symbol: str, status: str, pe: float | None) -> DomainEvent:
+    """Valuation signal triggered."""
+    return DomainEvent.create(
+        "TRACE_VALUATION",
+        symbol,
+        {"status": status, "pe": pe},
+    )
+
+
+def cashflow_alert(symbol: str, level: str, reasons: list[str]) -> DomainEvent:
+    """Cash flow signal triggered."""
+    return DomainEvent.create(
+        "TRACE_CASHFLOW",
+        symbol,
+        {"level": level, "reasons": reasons},
+    )
+
+
+def debt_alert(symbol: str, debt_ratio: float, level: str) -> DomainEvent:
+    """Debt signal triggered."""
+    return DomainEvent.create(
+        "TRACE_DEBT",
+        symbol,
+        {"debt_ratio": debt_ratio, "level": level},
+    )
+
+
+def growth_alert(symbol: str, growth_pct: float, level: str) -> DomainEvent:
+    """Growth signal triggered."""
+    return DomainEvent.create(
+        "TRACE_GROWTH",
+        symbol,
+        {"growth_pct": growth_pct, "level": level},
+    )
+
+
+def risk_alert(symbol: str, level: str, reasons: list[str]) -> DomainEvent:
+    """Risk signal triggered."""
+    return DomainEvent.create(
+        "TRACE_RISK",
+        symbol,
+        {"level": level, "reasons": reasons},
+    )

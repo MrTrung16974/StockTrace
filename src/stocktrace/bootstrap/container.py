@@ -9,9 +9,22 @@ from functools import lru_cache
 from stocktrace.ai.analysis_service import AnalysisService
 from stocktrace.ai.prompt_builder import PromptBuilder
 from stocktrace.ai.translation_service import TranslationService
+from stocktrace.application.queries.financial_handlers import (
+    CompareFinancialQueryHandler,
+    GetFinancialAnalysisQueryHandler,
+    GetFinancialReportQueryHandler,
+    GetFinancialScoreQueryHandler,
+    GetValuationQueryHandler,
+)
 from stocktrace.application.queries.stock_handlers import (
     GetStockNewsQueryHandler,
     GetStockQuoteQueryHandler,
+)
+from stocktrace.application.services.financial.ai_financial_analysis_service import (
+    AIFinancialAnalysisService,
+)
+from stocktrace.application.services.financial.financial_analysis_service import (
+    FinancialAnalysisService,
 )
 from stocktrace.application.services.health import HealthCheckService
 from stocktrace.application.services.market_analysis_service import MarketAnalysisService
@@ -30,8 +43,12 @@ from stocktrace.infrastructure.config import Settings, get_settings
 from stocktrace.infrastructure.db.repositories import SqlAlchemyWatchlistRepository
 from stocktrace.infrastructure.db.session import SessionManager
 from stocktrace.infrastructure.news.yahoo import YahooFinanceNewsProvider
+from stocktrace.infrastructure.providers.financial.composite import CompositeFinancialProvider
+from stocktrace.infrastructure.providers.financial.mock_provider import MockFinancialProvider
+from stocktrace.infrastructure.providers.financial.vnstock_provider import VNStockFinancialProvider
 from stocktrace.infrastructure.providers.yahoo import YahooFinanceQuoteProvider
 from stocktrace.infrastructure.providers.yahoo_historical import YahooHistoricalProvider
+from stocktrace.infrastructure.scheduler.financial_job import FinancialAnalysisJob
 from stocktrace.infrastructure.scheduler.market_analysis_job import MarketAnalysisJob
 from stocktrace.infrastructure.scheduler.protocols import TelegramMessageBot
 from stocktrace.infrastructure.scheduler.service import SchedulerService
@@ -54,6 +71,67 @@ class Container:
         self._stock_analysis_service: StockAnalysisService | None = None
         self._market_analysis_service: MarketAnalysisService | None = None
         self._historical_provider: YahooHistoricalProvider | None = None
+        self._financial_provider: CompositeFinancialProvider | None = None
+        self._financial_analysis_service: FinancialAnalysisService | None = None
+        self._ai_financial_service: AIFinancialAnalysisService | None = None
+
+    def financial_provider(self) -> CompositeFinancialProvider:
+        """Build composite financial data provider."""
+        if self._financial_provider is None:
+            providers = [
+                VNStockFinancialProvider(),
+                MockFinancialProvider(),
+            ]
+            self._financial_provider = CompositeFinancialProvider(providers=providers)
+        return self._financial_provider
+
+    def ai_financial_service(self) -> AIFinancialAnalysisService:
+        """Build AI financial analysis service."""
+        if self._ai_financial_service is None:
+            self._ai_financial_service = AIFinancialAnalysisService(
+                llm=create_llm_provider(self._settings.ai) if self._settings.ai.enabled else None,
+                settings=self._settings.ai,
+            )
+        return self._ai_financial_service
+
+    def financial_analysis_service(self) -> FinancialAnalysisService:
+        """Build financial analysis orchestration service."""
+        if self._financial_analysis_service is None:
+            self._financial_analysis_service = FinancialAnalysisService(
+                financial_provider=self.financial_provider(),
+                market_data_service=self.market_data_service(),
+                ai_service=self.ai_financial_service(),
+            )
+        return self._financial_analysis_service
+
+    def financial_analysis_handler(self) -> GetFinancialAnalysisQueryHandler:
+        """Build financial analysis query handler."""
+        return GetFinancialAnalysisQueryHandler(self.financial_analysis_service())
+
+    def financial_report_handler(self) -> GetFinancialReportQueryHandler:
+        """Build financial report query handler."""
+        return GetFinancialReportQueryHandler(self.financial_analysis_service())
+
+    def financial_valuation_handler(self) -> GetValuationQueryHandler:
+        """Build valuation query handler."""
+        return GetValuationQueryHandler(self.financial_analysis_service())
+
+    def financial_score_handler(self) -> GetFinancialScoreQueryHandler:
+        """Build financial score query handler."""
+        return GetFinancialScoreQueryHandler(self.financial_analysis_service())
+
+    def financial_compare_handler(self) -> CompareFinancialQueryHandler:
+        """Build financial compare query handler."""
+        return CompareFinancialQueryHandler(self.financial_analysis_service())
+
+    def financial_analysis_job(self, bot: TelegramMessageBot) -> FinancialAnalysisJob:
+        """Build scheduled financial analysis jobs."""
+        return FinancialAnalysisJob(
+            financial_service=self.financial_analysis_service(),
+            watchlist_service=self.watchlist_service(),
+            bot=bot,
+            settings=self._settings,
+        )
 
     def health_service(self) -> HealthCheckService:
         """Build the health service."""
@@ -207,6 +285,7 @@ class Container:
             settings=self._settings,
             stock_analysis_job=self.stock_analysis_job(bot),
             market_analysis_job=self.market_analysis_job(bot),
+            financial_analysis_job=self.financial_analysis_job(bot),
         )
 
     async def dispose(self) -> None:

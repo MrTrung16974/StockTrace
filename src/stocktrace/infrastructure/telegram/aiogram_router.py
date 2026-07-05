@@ -6,10 +6,15 @@ from aiogram import Router
 from aiogram.filters import Command, CommandObject
 from aiogram.types import Message
 
+from stocktrace.application.services.financial.financial_analysis_service import (
+    FinancialAnalysisService,
+)
 from stocktrace.application.services.market_analysis_service import MarketAnalysisService
 from stocktrace.application.services.market_data import MarketDataError, MarketDataService
 from stocktrace.application.services.stock_analysis_service import StockAnalysisService
 from stocktrace.application.services.watchlist import InvalidSymbolError, WatchlistService, normalize_symbol
+from stocktrace.domain.ports.financial_provider import FinancialDataNotFoundError
+from stocktrace.domain.value_objects.financial_period import FinancialPeriod
 from stocktrace.infrastructure.config import Settings
 from stocktrace.infrastructure.logging.config import get_logger
 from stocktrace.infrastructure.telegram.authorization import is_authorized_user, reject_unauthorized
@@ -38,6 +43,7 @@ def create_router(
     market_data_service: MarketDataService,
     stock_analysis_service: StockAnalysisService | None = None,
     market_analysis_service: MarketAnalysisService | None = None,
+    financial_analysis_service: FinancialAnalysisService | None = None,
 ) -> Router:
     """Create the Telegram command router."""
     router = Router(name="stocktrace-telegram")
@@ -222,5 +228,127 @@ def create_router(
             await thinking.edit_text(
                 "Không thể gửi báo cáo phân tích thị trường. Vui lòng thử lại sau.",
             )
+
+    async def _run_financial_command(
+        message: Message,
+        command: CommandObject,
+        period_default: str = "1Y",
+    ) -> None:
+        """Shared handler for financial analysis commands."""
+        if financial_analysis_service is None:
+            await message.answer("Financial analysis service is not configured.")
+            return
+
+        args = (command.args or "").strip().split()
+        if not args:
+            await message.answer("Usage: /financial SYMBOL PERIOD (e.g. /financial FPT 1Y)")
+            return
+
+        try:
+            symbol = normalize_symbol(args[0])
+            period_str = args[1].upper() if len(args) > 1 else period_default
+            period = FinancialPeriod.parse(period_str)
+        except (InvalidSymbolError, ValueError) as exc:
+            await message.answer(str(exc))
+            return
+
+        thinking = await message.answer(
+            f"⏳ Đang phân tích tài chính <b>{symbol}</b> ({period.label})...",
+        )
+        try:
+            dashboard = await financial_analysis_service.analyze(symbol, period)
+        except FinancialDataNotFoundError as exc:
+            await thinking.edit_text(str(exc))
+            return
+        except Exception as exc:
+            logger.error("financial_analysis_failed", symbol=symbol, error=str(exc))
+            await thinking.edit_text(f"Không thể phân tích tài chính cho <b>{symbol}</b>.")
+            return
+
+        try:
+            await deliver_html_messages(thinking, dashboard.telegram_html)
+        except Exception as exc:
+            logger.error("financial_delivery_failed", symbol=symbol, error=str(exc))
+            await thinking.edit_text(f"Không thể gửi báo cáo tài chính cho <b>{symbol}</b>.")
+
+    @router.message(Command("financial"))
+    async def financial(message: Message, command: CommandObject) -> None:
+        if not is_authorized_user(message.from_user, settings.telegram):
+            await reject_unauthorized(message)
+            return
+        await _run_financial_command(message, command)
+
+    @router.message(Command("report"))
+    async def report(message: Message, command: CommandObject) -> None:
+        if not is_authorized_user(message.from_user, settings.telegram):
+            await reject_unauthorized(message)
+            return
+        await _run_financial_command(message, command, period_default="1Y")
+
+    @router.message(Command("valuation"))
+    async def valuation(message: Message, command: CommandObject) -> None:
+        if not is_authorized_user(message.from_user, settings.telegram):
+            await reject_unauthorized(message)
+            return
+        await _run_financial_command(message, command, period_default="1Y")
+
+    @router.message(Command("score"))
+    async def score(message: Message, command: CommandObject) -> None:
+        if not is_authorized_user(message.from_user, settings.telegram):
+            await reject_unauthorized(message)
+            return
+        await _run_financial_command(message, command, period_default="1Y")
+
+    @router.message(Command("roe", "debt", "cashflow"))
+    async def financial_metric(message: Message, command: CommandObject) -> None:
+        if not is_authorized_user(message.from_user, settings.telegram):
+            await reject_unauthorized(message)
+            return
+        await _run_financial_command(message, command, period_default="1Y")
+
+    @router.message(Command("compare"))
+    async def compare(message: Message, command: CommandObject) -> None:
+        if not is_authorized_user(message.from_user, settings.telegram):
+            await reject_unauthorized(message)
+            return
+
+        if financial_analysis_service is None:
+            await message.answer("Financial analysis service is not configured.")
+            return
+
+        args = (command.args or "").strip().split()
+        if len(args) < 2:
+            await message.answer("Usage: /compare SYMBOL1 SYMBOL2 (e.g. /compare FPT CMG)")
+            return
+
+        try:
+            symbol_a = normalize_symbol(args[0])
+            symbol_b = normalize_symbol(args[1])
+            period = FinancialPeriod.parse(args[2].upper() if len(args) > 2 else "1Y")
+        except (InvalidSymbolError, ValueError) as exc:
+            await message.answer(str(exc))
+            return
+
+        thinking = await message.answer(
+            f"⏳ So sánh tài chính <b>{symbol_a}</b> vs <b>{symbol_b}</b>...",
+        )
+        try:
+            result = await financial_analysis_service.compare(symbol_a, symbol_b, period)
+        except FinancialDataNotFoundError as exc:
+            await thinking.edit_text(str(exc))
+            return
+
+        compare_text = "\n".join([
+            f"<b>Financial Comparison</b>",
+            result.comparison_summary,
+            "",
+            f"<b>{result.symbol_a.analysis.symbol}</b>: "
+            f"{result.symbol_a.analysis.score.overall_score}/10",
+            f"<b>{result.symbol_b.analysis.symbol}</b>: "
+            f"{result.symbol_b.analysis.score.overall_score}/10",
+            "",
+            f"Winner: <b>{result.winner}</b>",
+        ])
+        await deliver_html_messages(thinking, compare_text)
 
     return router
