@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date
 from decimal import Decimal
 
 from stocktrace.application.services.financial.ai_financial_analysis_service import (
     AIFinancialAnalysisService,
 )
+from stocktrace.application.services.financial.data_quality import FinancialDataQualityEngine
 from stocktrace.application.services.financial.ratio_engine import FinancialRatioEngine
 from stocktrace.application.services.financial.scoring_engine import FinancialScoringEngine
 from stocktrace.application.services.financial.signal_engine import FinancialSignalEngine
@@ -23,6 +23,7 @@ from stocktrace.domain.entities.financial import (
     CashFlow,
     FinancialAnalysis,
     FinancialDashboard,
+    FinancialProfile,
     FinancialStatement,
     IncomeStatement,
 )
@@ -60,6 +61,7 @@ class FinancialAnalysisService:
         valuation_engine: ValuationEngine | None = None,
         signal_engine: FinancialSignalEngine | None = None,
         visualization_engine: FinancialVisualizationEngine | None = None,
+        quality_engine: FinancialDataQualityEngine | None = None,
     ) -> None:
         self._provider = financial_provider
         self._market_data = market_data_service
@@ -69,6 +71,7 @@ class FinancialAnalysisService:
         self._valuation_engine = valuation_engine or ValuationEngine()
         self._signal_engine = signal_engine or FinancialSignalEngine()
         self._visualization = visualization_engine or FinancialVisualizationEngine()
+        self._quality_engine = quality_engine or FinancialDataQualityEngine()
 
     async def analyze(
         self,
@@ -77,8 +80,6 @@ class FinancialAnalysisService:
     ) -> FinancialDashboard:
         """Run full financial analysis and return visual dashboard."""
         symbol = normalize_symbol(raw_symbol)
-        period_start, period_end = period.date_range()
-
         fundamentals = await self._provider.get_company_fundamentals(symbol)
         income_stmts = await self._provider.get_income_statement(symbol, period)
         balance_sheets = await self._provider.get_balance_sheet(symbol, period)
@@ -89,6 +90,17 @@ class FinancialAnalysisService:
             raise FinancialDataNotFoundError(msg)
 
         statements = self._merge_statements(symbol, income_stmts, balance_sheets, cash_flows)
+        if not statements:
+            msg = f"Không thể ghép các báo cáo tài chính cùng kỳ cho {symbol}."
+            raise FinancialDataNotFoundError(msg)
+
+        quality = self._quality_engine.assess(
+            statements,
+            is_mock_data=fundamentals.is_mock_data,
+        )
+
+        period_start = statements[0].period_end
+        period_end = statements[-1].period_end
 
         current_price: Decimal | None = None
         shares = fundamentals.shares_outstanding
@@ -101,7 +113,21 @@ class FinancialAnalysisService:
 
         ratios = self._ratio_engine.calculate(statements, current_price, shares)
         valuation = self._valuation_engine.calculate(symbol, ratios, current_price)
-        score = self._scoring_engine.calculate(symbol, period.label, ratios, valuation)
+        profile = statements[-1].income.profile
+        investment_ready = (
+            quality.is_ready_for_investment_signal
+            and current_price is not None
+            and (profile != FinancialProfile.BANK or valuation.current_pb is not None)
+            and (profile == FinancialProfile.BANK or valuation.current_pe is not None)
+        )
+        score = self._scoring_engine.calculate(
+            symbol,
+            period.label,
+            ratios,
+            valuation,
+            profile=profile,
+            investment_ready=investment_ready,
+        )
         signals = self._signal_engine.detect(ratios, score, valuation)
 
         analysis = FinancialAnalysis(
@@ -115,6 +141,7 @@ class FinancialAnalysisService:
             score=score,
             valuation=valuation,
             fundamentals=fundamentals,
+            quality=quality,
             signals=signals,
         )
 
@@ -131,6 +158,7 @@ class FinancialAnalysisService:
                 score=analysis.score,
                 valuation=analysis.valuation,
                 fundamentals=analysis.fundamentals,
+                quality=analysis.quality,
                 ai_analysis=ai_result,
                 signals=analysis.signals,
                 generated_at=analysis.generated_at,
@@ -159,7 +187,7 @@ class FinancialAnalysisService:
             diff = score_b - score_a
 
         summary = (
-            f"{winner} scores higher ({diff:.1f} points). "
+            f"{winner} có điểm cao hơn ({diff:.1f} điểm). "
             f"{dash_a.analysis.symbol}: {score_a}/10 vs "
             f"{dash_b.analysis.symbol}: {score_b}/10."
         )

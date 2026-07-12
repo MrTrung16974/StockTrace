@@ -42,18 +42,18 @@ class FinancialSignalEngine:
 
         if latest and latest.revenue_growth is not None:
             if latest.revenue_growth > Decimal("15"):
-                reasons.append(f"Revenue growth >15% ({latest.revenue_growth:.1f}%)")
+                reasons.append(f"Doanh thu tăng trên 15% ({latest.revenue_growth:.1f}%)")
                 level = SignalLevel.GREEN
             elif latest.revenue_growth > Decimal("0"):
-                reasons.append(f"Revenue growth positive ({latest.revenue_growth:.1f}%)")
+                reasons.append(f"Doanh thu tăng trưởng dương ({latest.revenue_growth:.1f}%)")
             else:
-                reasons.append(f"Revenue declining ({latest.revenue_growth:.1f}%)")
+                reasons.append(f"Doanh thu đang giảm ({latest.revenue_growth:.1f}%)")
                 level = SignalLevel.RED
 
         return FinancialSignal(
             trace_type=TraceType.TRACE_GROWTH,
             level=level,
-            label="Financial Growth Signal",
+            label="Tín hiệu tăng trưởng tài chính",
             reasons=tuple(reasons),
         )
 
@@ -63,19 +63,19 @@ class FinancialSignalEngine:
 
         if latest and latest.operating_cash_flow is not None:
             if latest.operating_cash_flow > 0:
-                reasons.append("Positive operating cash flow")
+                reasons.append("Dòng tiền từ hoạt động kinh doanh dương")
                 level = SignalLevel.GREEN
             else:
-                reasons.append("Negative operating cash flow")
+                reasons.append("Dòng tiền từ hoạt động kinh doanh âm")
                 level = SignalLevel.RED
 
         if latest and latest.free_cash_flow is not None and latest.free_cash_flow > 0:
-            reasons.append("Positive free cash flow")
+            reasons.append("Dòng tiền tự do dương")
 
         return FinancialSignal(
             trace_type=TraceType.TRACE_CASHFLOW,
             level=level,
-            label="Cash Flow Signal",
+            label="Tín hiệu dòng tiền",
             reasons=tuple(reasons),
         )
 
@@ -85,18 +85,18 @@ class FinancialSignalEngine:
 
         if latest and latest.roe is not None:
             if latest.roe > Decimal("20"):
-                reasons.append(f"ROE >20% ({latest.roe:.1f}%)")
+                reasons.append(f"ROE trên 20% ({latest.roe:.1f}%)")
                 level = SignalLevel.GREEN
             elif latest.roe > Decimal("10"):
-                reasons.append(f"ROE above average ({latest.roe:.1f}%)")
+                reasons.append(f"ROE cao hơn mức trung bình ({latest.roe:.1f}%)")
             else:
-                reasons.append(f"ROE below average ({latest.roe:.1f}%)")
+                reasons.append(f"ROE thấp hơn mức trung bình ({latest.roe:.1f}%)")
                 level = SignalLevel.RED
 
         return FinancialSignal(
             trace_type=TraceType.TRACE_FINANCIAL,
             level=level,
-            label="Profitability Signal",
+            label="Tín hiệu khả năng sinh lời",
             reasons=tuple(reasons),
         )
 
@@ -105,20 +105,20 @@ class FinancialSignalEngine:
         level = SignalLevel.YELLOW
 
         if valuation.current_pe is not None:
-            reasons.append(f"Current PE: {valuation.current_pe:.1f}")
+            reasons.append(f"PE hiện tại: {valuation.current_pe:.1f}")
         if valuation.status == ValuationStatus.UNDERVALUED:
-            reasons.append("Status: UNDERVALUED")
+            reasons.append("Trạng thái: ĐANG RẺ")
             level = SignalLevel.GREEN
         elif valuation.status == ValuationStatus.OVERVALUED:
-            reasons.append("Status: OVERVALUED")
+            reasons.append("Trạng thái: ĐANG ĐẮT")
             level = SignalLevel.RED
         else:
-            reasons.append("Status: FAIR")
+            reasons.append("Trạng thái: HỢP LÝ")
 
         return FinancialSignal(
             trace_type=TraceType.TRACE_VALUATION,
             level=level,
-            label="Valuation Signal",
+            label="Tín hiệu định giá",
             reasons=tuple(reasons),
         )
 
@@ -132,20 +132,20 @@ class FinancialSignalEngine:
 
         if latest and latest.debt_to_equity is not None:
             if latest.debt_to_equity < Decimal("0.5"):
-                reasons.append(f"Debt ratio <0.5 ({latest.debt_to_equity:.2f})")
+                reasons.append(f"Tỷ lệ nợ dưới 0,5 ({latest.debt_to_equity:.2f})")
                 level = SignalLevel.GREEN
             elif latest.debt_to_equity > Decimal("1.5"):
-                reasons.append(f"High debt ratio ({latest.debt_to_equity:.2f})")
+                reasons.append(f"Tỷ lệ nợ cao ({latest.debt_to_equity:.2f})")
                 level = SignalLevel.RED
             else:
-                reasons.append(f"Moderate debt ratio ({latest.debt_to_equity:.2f})")
+                reasons.append(f"Tỷ lệ nợ trung bình ({latest.debt_to_equity:.2f})")
 
         if score.overall_score >= Decimal("7"):
-            reasons.append(f"Financial score: {score.overall_score}/10")
+            reasons.append(f"Điểm tài chính: {score.overall_score}/10")
 
         return FinancialSignal(
             trace_type=TraceType.TRACE_RISK,
             level=level,
-            label="Risk Signal",
+            label="Tín hiệu rủi ro",
             reasons=tuple(reasons),
         )

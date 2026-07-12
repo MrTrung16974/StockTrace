@@ -45,7 +45,15 @@ class MarketAnalysisJob:
 
         try:
             bundle = await self._service.analyze_market()
-            report = build_market_analysis_report(bundle)
+            try:
+                report = build_market_analysis_report(bundle)
+            except Exception as exc:
+                self._logger.warning(
+                    "market_analysis_format_failed",
+                    job_name=job_name,
+                    error=str(exc),
+                )
+                report = "Khong the dinh dang bao cao thi truong chi tiet."
             report = f"<b>{title}</b>\n\n{report}"
             await self._bot.send_message(
                 chat_id=chat_id,

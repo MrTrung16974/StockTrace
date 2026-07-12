@@ -16,6 +16,27 @@ from stocktrace.domain.entities.financial import (
     Valuation,
 )
 
+_RECOMMENDATION_VI = {
+    "STRONG SELL": "BÁN MẠNH",
+    "SELL": "BÁN",
+    "HOLD": "NẮM GIỮ",
+    "BUY": "MUA",
+    "STRONG BUY": "MUA MẠNH",
+}
+_VALUATION_STATUS_VI = {
+    "UNDERVALUED": "ĐANG RẺ",
+    "FAIR": "HỢP LÝ",
+    "OVERVALUED": "ĐANG ĐẮT",
+}
+
+
+def _translate_recommendation(value: str) -> str:
+    return _RECOMMENDATION_VI.get(value, value)
+
+
+def _translate_valuation_status(value: str) -> str:
+    return _VALUATION_STATUS_VI.get(value, value)
+
 
 def _format_billion(value: Decimal) -> str:
     """Format value in billions."""
@@ -128,40 +149,36 @@ class FinancialVisualizationEngine:
         self,
         statements: tuple[FinancialStatement, ...],
     ) -> ChartMetadata:
-        revenue_points = tuple(
-            ChartDataPoint(s.period, s.income.revenue) for s in statements
-        )
-        profit_points = tuple(
-            ChartDataPoint(s.period, s.income.net_income) for s in statements
-        )
+        revenue_points = tuple(ChartDataPoint(s.period, s.income.revenue) for s in statements)
+        profit_points = tuple(ChartDataPoint(s.period, s.income.net_income) for s in statements)
 
-        revenue_series = ChartSeries("Revenue", revenue_points, "Billion VND")
-        profit_series = ChartSeries("Profit", profit_points, "Billion VND")
+        revenue_series = ChartSeries("Doanh thu", revenue_points, "Tỷ đồng")
+        profit_series = ChartSeries("Lợi nhuận", profit_points, "Tỷ đồng")
 
         ascii_render = (
-            _ascii_line_chart("Revenue", revenue_points, "Billion VND")
+            _ascii_line_chart("Doanh thu", revenue_points, "Tỷ đồng")
             + "\n\n"
-            + _ascii_line_chart("Profit", profit_points, "Billion VND")
+            + _ascii_line_chart("Lợi nhuận", profit_points, "Tỷ đồng")
         )
 
         return ChartMetadata(
             chart_id="revenue_profit_trend",
             chart_type="line",
-            title="Revenue & Profit Trend",
+            title="Xu hướng doanh thu và lợi nhuận",
             series=(revenue_series, profit_series),
             ascii_render=ascii_render,
         )
 
     def _health_score_chart(self, score: FinancialScore) -> ChartMetadata:
         categories = (
-            ChartDataPoint("Growth", score.growth_score * Decimal("10")),
-            ChartDataPoint("Profitability", score.profitability_score * Decimal("10")),
-            ChartDataPoint("Cash Flow", score.cash_flow_score * Decimal("10")),
-            ChartDataPoint("Debt", score.debt_score * Decimal("10")),
-            ChartDataPoint("Valuation", score.valuation_score * Decimal("10")),
+            ChartDataPoint("Tăng trưởng", score.growth_score * Decimal("10")),
+            ChartDataPoint("Sinh lời", score.profitability_score * Decimal("10")),
+            ChartDataPoint("Dòng tiền", score.cash_flow_score * Decimal("10")),
+            ChartDataPoint("Nợ", score.debt_score * Decimal("10")),
+            ChartDataPoint("Định giá", score.valuation_score * Decimal("10")),
         )
 
-        lines = ["Financial Health Score"]
+        lines = ["Điểm sức khỏe tài chính"]
         for cat in categories:
             bar = _bar(cat.value, Decimal("100"))
             lines.append(f"{cat.label:<14} {bar} {cat.value:.0f}")
@@ -169,8 +186,8 @@ class FinancialVisualizationEngine:
         return ChartMetadata(
             chart_id="financial_health_score",
             chart_type="bar",
-            title="Financial Health Score",
-            series=(ChartSeries("Score", categories, "%"),),
+            title="Điểm sức khỏe tài chính",
+            series=(ChartSeries("Điểm", categories, "%"),),
             ascii_render="\n".join(lines),
         )
 
@@ -181,7 +198,7 @@ class FinancialVisualizationEngine:
         segments = fundamentals.revenue_segments
         points = tuple(ChartDataPoint(s.name, s.percentage) for s in segments)
 
-        lines = ["Revenue Structure"]
+        lines = ["Cơ cấu doanh thu"]
         for seg in segments:
             lines.append(f"{seg.name:<15} {seg.percentage:.0f}%")
 
@@ -192,8 +209,8 @@ class FinancialVisualizationEngine:
         return ChartMetadata(
             chart_id="revenue_structure",
             chart_type="pie",
-            title="Revenue Structure",
-            series=(ChartSeries("Segments", points, "%"),),
+            title="Cơ cấu doanh thu",
+            series=(ChartSeries("Phân khúc", points, "%"),),
             ascii_render="\n".join(lines),
         )
 
@@ -207,24 +224,30 @@ class FinancialVisualizationEngine:
         return f"    {pie}\n   {largest.name}"
 
     def _valuation_chart(self, valuation: Valuation) -> ChartMetadata:
-        pe_points = tuple(
-            ChartDataPoint(str(year), pe) for year, pe in valuation.historical_pe
-        )
+        pe_points = tuple(ChartDataPoint(str(year), pe) for year, pe in valuation.historical_pe)
 
-        ascii_render = _ascii_line_chart("Historical PE", pe_points, "PE")
+        ascii_render = _ascii_line_chart("PE lịch sử", pe_points, "PE")
         ascii_render += "\n\n"
         ascii_render += "\n".join(
             [
-                f"Current PE : {valuation.current_pe:.1f}" if valuation.current_pe else "Current PE : N/A",
-                f"Average PE : {valuation.average_pe:.1f}" if valuation.average_pe else "Average PE : N/A",
-                f"Status     : {valuation.status.value}",
+                (
+                    f"PE hiện tại : {valuation.current_pe:.1f}"
+                    if valuation.current_pe
+                    else "PE hiện tại : Chưa có"
+                ),
+                (
+                    f"PE trung bình : {valuation.average_pe:.1f}"
+                    if valuation.average_pe
+                    else "PE trung bình : Chưa có"
+                ),
+                f"Trạng thái : {_translate_valuation_status(valuation.status.value)}",
             ],
         )
 
         return ChartMetadata(
             chart_id="valuation",
             chart_type="line",
-            title="Valuation",
+            title="Định giá",
             series=(ChartSeries("PE", pe_points, "PE"),),
             ascii_render=ascii_render,
         )
@@ -240,9 +263,9 @@ class FinancialVisualizationEngine:
         return ChartMetadata(
             chart_id="cashflow_trend",
             chart_type="bar",
-            title="Operating Cash Flow",
-            series=(ChartSeries("Operating CF", cf_points, "Billion VND"),),
-            ascii_render=_ascii_bar_chart("Operating CF", cf_points, "Billion VND"),
+            title="Dòng tiền từ hoạt động kinh doanh",
+            series=(ChartSeries("Dòng tiền HĐKD", cf_points, "Tỷ đồng"),),
+            ascii_render=_ascii_bar_chart("Dòng tiền HĐKD", cf_points, "Tỷ đồng"),
         )
 
     def _build_telegram_html(
@@ -253,7 +276,6 @@ class FinancialVisualizationEngine:
         """Build HTML-formatted Telegram dashboard message."""
         score = analysis.score
         ai = analysis.ai_analysis
-        val = analysis.valuation
 
         period_str = (
             f"{analysis.period_start.strftime('%m/%Y')} → "
@@ -262,17 +284,40 @@ class FinancialVisualizationEngine:
 
         header = [
             f"<b>{analysis.company_name}</b>",
-            "Financial Analysis Dashboard",
-            f"Period: {period_str}",
+            "Báo cáo phân tích tài chính",
+            f"Kỳ: {period_str}",
+            f"Nguồn dữ liệu: {analysis.fundamentals.data_source}",
+            f"Số kỳ báo cáo: {len(analysis.statements)}",
+            f"Chất lượng dữ liệu: {analysis.quality.score:.0f}/100",
             "",
-            f"Recommendation : <b>{score.recommendation.value}</b>",
-            f"Confidence     : {self._confidence(score)}%",
-            f"Financial Score: {score.overall_score} / 10",
+            f"Tín hiệu định lượng: <b>{_translate_recommendation(score.recommendation.value)}</b>",
+            f"Độ tin cậy : {self._confidence(score)}%",
+            f"Điểm tài chính: {score.overall_score} / 10",
         ]
+        if analysis.fundamentals.is_mock_data:
+            header.extend(
+                [
+                    "",
+                    "⚠ <b>DỮ LIỆU MÔ PHỎNG</b>: chỉ dùng để kiểm thử, "
+                    "không dùng cho quyết định đầu tư.",
+                ],
+            )
+        else:
+            header.append("Lưu ý: tín hiệu định lượng không phải khuyến nghị đầu tư.")
+        if analysis.quality.issues:
+            header.extend(
+                [
+                    "",
+                    "<b>Điều kiện chưa đạt</b>",
+                    *(f"• {issue}" for issue in analysis.quality.issues),
+                ],
+            )
 
         chart_blocks = []
         for chart in charts:
-            chart_blocks.extend(["", f"<b>{chart.title}</b>", "<pre>", chart.ascii_render, "</pre>"])
+            chart_blocks.extend(
+                ["", f"<b>{chart.title}</b>", "<pre>", chart.ascii_render, "</pre>"],
+            )
 
         strengths = []
         risks = []
@@ -286,24 +331,26 @@ class FinancialVisualizationEngine:
                 elif sig.level.value == "red":
                     risks.extend(f"⚠ {r}" for r in sig.reasons)
 
-        strength_block = ["", "<b>STRENGTHS</b>"] + (strengths or ["✓ No significant strengths detected"])
-        risk_block = ["", "<b>RISKS</b>"] + (risks or ["⚠ No significant risks detected"])
+        strength_block = ["", "<b>ĐIỂM MẠNH</b>"] + (
+            strengths or ["✓ Chưa phát hiện điểm mạnh đáng kể"]
+        )
+        risk_block = ["", "<b>RỦI RO</b>"] + (risks or ["⚠ Chưa phát hiện rủi ro đáng kể"])
 
         ai_block: list[str] = []
         if ai:
             ai_block = [
                 "",
-                "<b>AI SUMMARY</b>",
+                "<b>TÓM TẮT AI</b>",
                 ai.executive_summary,
                 "",
-                f"Recommendation: <b>{ai.recommendation.value}</b>",
+                f"Khuyến nghị: <b>{_translate_recommendation(ai.recommendation.value)}</b>",
             ]
             if ai.target_price:
-                ai_block.append(f"Target price: {ai.target_price:,.0f} VND")
-            ai_block.append(f"Confidence: {ai.confidence:.0f}%")
+                ai_block.append(f"Giá mục tiêu: {ai.target_price:,.0f} VND")
+            ai_block.append(f"Độ tin cậy: {ai.confidence:.0f}%")
 
         signal_icons = {"green": "🟢", "yellow": "🟡", "red": "🔴"}
-        alert_block = ["", "<b>ALERT ENGINE</b>"]
+        alert_block = ["", "<b>TÍN HIỆU CẢNH BÁO</b>"]
         for sig in analysis.signals:
             icon = signal_icons.get(sig.level.value, "⚪")
             alert_block.append(f"{icon} {sig.label}")
@@ -341,10 +388,18 @@ class FinancialVisualizationEngine:
                 "valuation": float(score.valuation_score),
             },
             "valuation": {
-                "current_pe": float(analysis.valuation.current_pe) if analysis.valuation.current_pe else None,
-                "average_pe": float(analysis.valuation.average_pe) if analysis.valuation.average_pe else None,
+                "current_pe": (
+                    float(analysis.valuation.current_pe) if analysis.valuation.current_pe else None
+                ),
+                "average_pe": (
+                    float(analysis.valuation.average_pe) if analysis.valuation.average_pe else None
+                ),
                 "status": analysis.valuation.status.value,
-                "target_price": float(analysis.valuation.target_price) if analysis.valuation.target_price else None,
+                "target_price": (
+                    float(analysis.valuation.target_price)
+                    if analysis.valuation.target_price
+                    else None
+                ),
             },
             "charts": [
                 {
@@ -355,7 +410,9 @@ class FinancialVisualizationEngine:
                         {
                             "name": s.name,
                             "unit": s.unit,
-                            "points": [{"label": p.label, "value": float(p.value)} for p in s.points],
+                            "points": [
+                                {"label": p.label, "value": float(p.value)} for p in s.points
+                            ],
                         }
                         for s in c.series
                     ],

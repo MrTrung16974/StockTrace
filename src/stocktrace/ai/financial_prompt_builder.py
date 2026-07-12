@@ -10,7 +10,7 @@ class FinancialPromptBuilder:
 
     SYSTEM_PROMPT = (
         "You are a senior equity research analyst specializing in Vietnamese stocks. "
-        "Provide concise, actionable financial analysis in English. "
+        "Provide concise, actionable financial analysis in Vietnamese. "
         "Use bullet points for strengths, weaknesses, opportunities, and risks."
     )
 
@@ -21,7 +21,8 @@ class FinancialPromptBuilder:
         strength_hints = "\n".join(f"- {s}" for s in context.strengths_hints)
         risk_hints = "\n".join(f"- {r}" for r in context.risks_hints)
 
-        return f"""Analyze the financial health of {context.company_name} ({context.symbol}) for period {context.period_label}.
+        return f"""Analyze the financial health of {context.company_name} ({context.symbol})
+for period {context.period_label}.
 
 Financial Score: {context.score.overall_score}/10
 Recommendation: {context.score.recommendation.value}

@@ -10,6 +10,7 @@ from stocktrace.domain.entities.watchlist_item import WatchlistItem
 from stocktrace.infrastructure.config.test import load_test_settings
 from stocktrace.infrastructure.telegram.messages import (
     build_added_message,
+    build_bot_command_specs,
     build_help_message,
     build_news_message,
     build_price_message,
@@ -23,7 +24,7 @@ from stocktrace.infrastructure.telegram.messages import (
 def test_build_start_message_mentions_connection() -> None:
     message = build_start_message()
 
-    assert "StockTrace is connected." in message
+    assert "StockTrace đã kết nối." in message
     assert "/status" in message
 
 
@@ -33,18 +34,27 @@ def test_build_help_message_mentions_future_commands() -> None:
     assert "/add SYMBOL" in message
     assert "/news SYMBOL" in message
     assert "/analysis SYMBOL" in message
+    assert "/financial SYMBOL PERIOD" in message
+    assert "/trace SYMBOL" in message
+    assert "/why SYMBOL" in message
+
+
+def test_bot_command_specs_include_trace_and_financial_commands() -> None:
+    commands = {command for command, _ in build_bot_command_specs()}
+
+    assert {"financial", "trace", "why", "signals", "risks"}.issubset(commands)
 
 
 def test_build_status_message_uses_settings() -> None:
     message = build_status_message(load_test_settings())
 
-    assert "Environment: test" in message
-    assert "Database: SQLite" in message
-    assert "AI enabled: False" in message
+    assert "Môi trường: test" in message
+    assert "Cơ sở dữ liệu: SQLite" in message
+    assert "AI đã bật: False" in message
 
 
 def test_build_watchlist_message_handles_empty_list() -> None:
-    assert build_watchlist_message([]) == "Watchlist is empty. Use /add SYMBOL to add one."
+    assert build_watchlist_message([]) == "Danh sách theo dõi đang trống. Dùng /add MA để thêm mã."
 
 
 def test_build_watchlist_message_lists_symbols() -> None:
@@ -59,9 +69,9 @@ def test_build_watchlist_message_lists_symbols() -> None:
 
 
 def test_build_added_and_removed_messages() -> None:
-    assert build_added_message("FPT") == "Added FPT to watchlist."
-    assert build_removed_message("FPT", removed=True) == "Removed FPT from watchlist."
-    assert build_removed_message("FPT", removed=False) == "FPT was not in watchlist."
+    assert build_added_message("FPT") == "Đã thêm FPT vào danh sách theo dõi."
+    assert build_removed_message("FPT", removed=True) == "Đã xóa FPT khỏi danh sách theo dõi."
+    assert build_removed_message("FPT", removed=False) == "FPT không có trong danh sách theo dõi."
 
 
 def test_build_price_message_formats_quote() -> None:
@@ -101,9 +111,11 @@ def test_build_news_message_lists_articles_and_escapes_html() -> None:
         ],
     )
 
-    assert "News for FPT:" in message
+    assert "Tin tức về FPT:" in message
     assert '<a href="https://example.com/news?a=1&amp;b=2">FPT &amp; market update</a>' in message
 
 
 def test_build_news_message_handles_empty_articles() -> None:
-    assert build_news_message(symbol="FPT", articles=[]) == "No recent news found for FPT."
+    assert build_news_message(symbol="FPT", articles=[]) == (
+        "Không tìm thấy tin tức gần đây cho FPT."
+    )

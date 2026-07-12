@@ -18,4 +18,4 @@ def is_authorized_user(user: User | None, settings: TelegramSettings) -> bool:
 
 async def reject_unauthorized(message: Message) -> None:
     """Send a minimal unauthorized response."""
-    await message.answer("Unauthorized.")
+    await message.answer("Bạn không có quyền sử dụng bot này.")

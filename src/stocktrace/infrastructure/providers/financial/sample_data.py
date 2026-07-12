@@ -71,12 +71,56 @@ _COMPANY_DATA: dict[str, dict] = {
             ("Q4", date(2025, 12, 31), Decimal("3800"), Decimal("480"), Decimal("280")),
         ],
     },
+    "HPG": {
+        "name": "HOA PHAT GROUP",
+        "sector": "Materials",
+        "industry": "Steel",
+        "market_cap": Decimal("180000") * _BILLION,
+        "shares": Decimal("6400000000"),
+        "segments": (
+            RevenueSegment("Steel", Decimal("84")),
+            RevenueSegment("Agriculture", Decimal("9")),
+            RevenueSegment("Real Estate", Decimal("5")),
+            RevenueSegment("Other", Decimal("2")),
+        ),
+        "quarters": [
+            ("Q1", date(2025, 3, 31), Decimal("31000"), Decimal("3300"), Decimal("3900")),
+            ("Q2", date(2025, 6, 30), Decimal("33500"), Decimal("3600"), Decimal("4200")),
+            ("Q3", date(2025, 9, 30), Decimal("35200"), Decimal("3900"), Decimal("4500")),
+            ("Q4", date(2025, 12, 31), Decimal("37800"), Decimal("4300"), Decimal("5100")),
+        ],
+    },
 }
 
 _HISTORICAL_PE: dict[str, list[tuple[int, Decimal]]] = {
-    "FPT": [(2021, Decimal("15")), (2022, Decimal("17")), (2023, Decimal("21")), (2024, Decimal("23")), (2025, Decimal("19.2"))],
-    "VCB": [(2021, Decimal("12")), (2022, Decimal("14")), (2023, Decimal("16")), (2024, Decimal("18")), (2025, Decimal("15.5"))],
-    "CMG": [(2021, Decimal("18")), (2022, Decimal("20")), (2023, Decimal("22")), (2024, Decimal("25")), (2025, Decimal("21"))],
+    "FPT": [
+        (2021, Decimal("15")),
+        (2022, Decimal("17")),
+        (2023, Decimal("21")),
+        (2024, Decimal("23")),
+        (2025, Decimal("19.2")),
+    ],
+    "VCB": [
+        (2021, Decimal("12")),
+        (2022, Decimal("14")),
+        (2023, Decimal("16")),
+        (2024, Decimal("18")),
+        (2025, Decimal("15.5")),
+    ],
+    "CMG": [
+        (2021, Decimal("18")),
+        (2022, Decimal("20")),
+        (2023, Decimal("22")),
+        (2024, Decimal("25")),
+        (2025, Decimal("21")),
+    ],
+    "HPG": [
+        (2021, Decimal("11")),
+        (2022, Decimal("9")),
+        (2023, Decimal("14")),
+        (2024, Decimal("17")),
+        (2025, Decimal("12.8")),
+    ],
 }
 
 
@@ -85,7 +129,14 @@ def get_company_data(symbol: str) -> dict | None:
     return _COMPANY_DATA.get(symbol.upper())
 
 
-def build_income_statement(symbol: str, period: str, period_end: date, revenue_b: Decimal, profit_b: Decimal, ocf_b: Decimal) -> IncomeStatement:
+def build_income_statement(
+    symbol: str,
+    period: str,
+    period_end: date,
+    revenue_b: Decimal,
+    profit_b: Decimal,
+    ocf_b: Decimal,
+) -> IncomeStatement:
     """Build a sample income statement."""
     revenue = revenue_b * _BILLION
     cogs = revenue * Decimal("0.55")
@@ -112,7 +163,12 @@ def build_income_statement(symbol: str, period: str, period_end: date, revenue_b
     )
 
 
-def build_balance_sheet(symbol: str, period: str, period_end: date, revenue_b: Decimal) -> BalanceSheet:
+def build_balance_sheet(
+    symbol: str,
+    period: str,
+    period_end: date,
+    revenue_b: Decimal,
+) -> BalanceSheet:
     """Build a sample balance sheet."""
     assets = revenue_b * _BILLION * Decimal("3")
     equity = assets * Decimal("0.45")
@@ -140,7 +196,13 @@ def build_balance_sheet(symbol: str, period: str, period_end: date, revenue_b: D
     )
 
 
-def build_cash_flow(symbol: str, period: str, period_end: date, ocf_b: Decimal, profit_b: Decimal) -> CashFlow:
+def build_cash_flow(
+    symbol: str,
+    period: str,
+    period_end: date,
+    ocf_b: Decimal,
+    profit_b: Decimal,
+) -> CashFlow:
     """Build a sample cash flow statement."""
     ocf = ocf_b * _BILLION
     capex = ocf * Decimal("0.3")
@@ -171,4 +233,6 @@ def build_fundamentals(symbol: str) -> CompanyFundamental | None:
         market_cap=data["market_cap"],
         shares_outstanding=data["shares"],
         revenue_segments=data["segments"],
+        data_source="Dữ liệu mô phỏng nội bộ",
+        is_mock_data=True,
     )

@@ -10,6 +10,11 @@ from stocktrace.infrastructure.db.models.financial import (
     ValuationHistoryModel,
 )
 from stocktrace.infrastructure.db.models.stock_timeline import StockTimelineModel
+from stocktrace.infrastructure.db.models.trace import (
+    TraceDocumentModel,
+    TraceEventModel,
+    TraceSourceModel,
+)
 from stocktrace.infrastructure.db.models.watchlist import WatchlistItemModel
 
 __all__ = [
@@ -20,6 +25,9 @@ __all__ = [
     "FinancialScoreModel",
     "FinancialStatementModel",
     "StockTimelineModel",
+    "TraceDocumentModel",
+    "TraceEventModel",
+    "TraceSourceModel",
     "ValuationHistoryModel",
     "WatchlistItemModel",
 ]

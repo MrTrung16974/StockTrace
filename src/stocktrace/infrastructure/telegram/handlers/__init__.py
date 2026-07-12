@@ -1,16 +1,11 @@
-"""Telegram command handler registration."""
+"""Telegram command handlers.
+
+The active Telegram adapter is aiogram. This package remains as a compatibility
+import path for older code that imported ``stocktrace.infrastructure.telegram.handlers``.
+"""
 
 from __future__ import annotations
 
-from telegram.ext import Application, CommandHandler
+from stocktrace.infrastructure.telegram.aiogram_router import create_router
 
-from stocktrace.bootstrap.container import Container
-
-
-def register_handlers(app: Application, container: Container) -> None:
-    """Register all Telegram command handlers onto the Application."""
-    app.add_handler(CommandHandler("price", container.price_handler.handle))
-    app.add_handler(CommandHandler("news", container.news_handler.handle))
-
-
-__all__ = ["register_handlers"]
+__all__ = ["create_router"]

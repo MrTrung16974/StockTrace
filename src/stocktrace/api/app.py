@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from stocktrace.api.middleware.request_timing import RequestTimingMiddleware
 from stocktrace.api.middleware.security import ApiSecurityMiddleware
-from stocktrace.api.routers import financial, health, stocks, system
+from stocktrace.api.routers import financial, health, stocks, system, trace
 from stocktrace.bootstrap.container import Container
 from stocktrace.infrastructure.config import Settings, get_settings
 from stocktrace.infrastructure.logging.config import configure_logging, get_logger
@@ -43,6 +43,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         stock_analysis_service=container.stock_analysis_service(),
         market_analysis_service=container.market_analysis_service(),
         financial_analysis_service=container.financial_analysis_service(),
+        trace_service=container.trace_service(),
         scheduler_service_factory=container.scheduler_service,
     )
     await app.state.telegram_runner.start()
@@ -85,12 +86,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(system.router)
     app.include_router(stocks.router)
     app.include_router(financial.router)
+    app.include_router(trace.router)
 
-    # Prometheus /metrics endpoint — only if enabled
+    # Prometheus /metrics endpoint — only if enabled and dependency is available.
     if app_settings.observability.prometheus_enabled:
-        from prometheus_client import make_asgi_app  # noqa: PLC0415
-
-        metrics_app = make_asgi_app()
-        app.mount(app_settings.observability.prometheus_path, metrics_app)
+        logger = get_logger(__name__)
+        try:
+            from prometheus_client import make_asgi_app  # noqa: PLC0415
+        except ModuleNotFoundError:
+            logger.warning("prometheus_client_missing")
+        else:
+            metrics_app = make_asgi_app()
+            app.mount(app_settings.observability.prometheus_path, metrics_app)
 
     return app

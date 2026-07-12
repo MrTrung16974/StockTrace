@@ -9,19 +9,22 @@ from contextlib import suppress
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
+from aiogram.types import BotCommand
 from aiogram.utils.token import TokenValidationError
 
 from stocktrace.application.services.financial.financial_analysis_service import (
     FinancialAnalysisService,
 )
-from stocktrace.application.services.market_data import MarketDataService
 from stocktrace.application.services.market_analysis_service import MarketAnalysisService
+from stocktrace.application.services.market_data import MarketDataService
 from stocktrace.application.services.stock_analysis_service import StockAnalysisService
+from stocktrace.application.services.trace import TraceService
 from stocktrace.application.services.watchlist import WatchlistService
 from stocktrace.infrastructure.config import Settings
 from stocktrace.infrastructure.logging.config import get_logger
 from stocktrace.infrastructure.scheduler import SchedulerService
 from stocktrace.infrastructure.telegram.aiogram_router import create_router
+from stocktrace.infrastructure.telegram.messages import build_bot_command_specs
 
 
 class TelegramBotRunner:
@@ -35,6 +38,7 @@ class TelegramBotRunner:
         stock_analysis_service: StockAnalysisService | None = None,
         market_analysis_service: MarketAnalysisService | None = None,
         financial_analysis_service: FinancialAnalysisService | None = None,
+        trace_service: TraceService | None = None,
         scheduler_service_factory: Callable[[Bot], SchedulerService] | None = None,
     ) -> None:
         self._settings = settings
@@ -43,6 +47,7 @@ class TelegramBotRunner:
         self._stock_analysis_service = stock_analysis_service
         self._market_analysis_service = market_analysis_service
         self._financial_analysis_service = financial_analysis_service
+        self._trace_service = trace_service
         self._scheduler_service_factory = scheduler_service_factory
         self._scheduler_service: SchedulerService | None = None
         self._logger = get_logger(__name__)
@@ -84,6 +89,16 @@ class TelegramBotRunner:
             self._bot = None
             return
 
+        try:
+            await self._bot.set_my_commands(
+                [
+                    BotCommand(command=command, description=description)
+                    for command, description in build_bot_command_specs()
+                ],
+            )
+        except Exception as exc:
+            self._logger.warning("telegram_command_menu_sync_failed", error=str(exc))
+
         self._dispatcher = Dispatcher()
         self._dispatcher.include_router(
             create_router(
@@ -93,6 +108,7 @@ class TelegramBotRunner:
                 self._stock_analysis_service,
                 self._market_analysis_service,
                 self._financial_analysis_service,
+                self._trace_service,
             ),
         )
 

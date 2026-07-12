@@ -48,7 +48,7 @@ def normalize_symbol(raw_symbol: str | None) -> str:
     symbol = (raw_symbol or "").strip().upper()
     if not SYMBOL_PATTERN.fullmatch(symbol):
         raise InvalidSymbolError(
-            "Symbol must be 1-16 characters and contain only letters, numbers, dot, dash, "
-            "or underscore.",
+            "Mã phải có từ 1 đến 16 ký tự và chỉ chứa chữ cái, chữ số, dấu chấm, gạch ngang "
+            "hoặc gạch dưới.",
         )
     return symbol

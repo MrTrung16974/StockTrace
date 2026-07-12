@@ -13,16 +13,46 @@ from stocktrace.application.services.stock_analysis_service import AnalysisBundl
 from stocktrace.domain.entities.watchlist_item import WatchlistItem
 from stocktrace.infrastructure.config import Settings
 
+BotCommandSpec = tuple[str, str]
+_MAX_DECIMAL_PLACES = -2
+
+
+def build_bot_command_specs() -> tuple[BotCommandSpec, ...]:
+    """Build Telegram bot command menu specs."""
+    return (
+        ("status", "trạng thái hệ thống"),
+        ("help", "xem danh sách lệnh"),
+        ("add", "thêm mã vào danh sách theo dõi"),
+        ("remove", "xóa mã khỏi danh sách theo dõi"),
+        ("list", "xem danh sách theo dõi"),
+        ("price", "giá mới nhất"),
+        ("news", "tin tức mới nhất"),
+        ("analysis", "phân tích cổ phiếu bằng AI"),
+        ("market", "phân tích thị trường"),
+        ("financial", "phân tích tài chính"),
+        ("report", "báo cáo tài chính"),
+        ("valuation", "phân tích định giá"),
+        ("score", "điểm tài chính"),
+        ("roe", "phân tích ROE"),
+        ("debt", "phân tích nợ"),
+        ("cashflow", "phân tích dòng tiền"),
+        ("compare", "so sánh hai mã"),
+        ("trace", "dòng thời gian theo dõi mã"),
+        ("why", "giải thích nguyên nhân"),
+        ("signals", "tín hiệu theo dõi"),
+        ("risks", "rủi ro theo dõi"),
+    )
+
 
 def build_start_message() -> str:
     """Build the /start response."""
     return "\n".join(
         [
-            "StockTrace is connected.",
+            "StockTrace đã kết nối.",
             "",
-            "Commands:",
-            "/status - system status",
-            "/help - show commands",
+            "Lệnh:",
+            "/status - trạng thái hệ thống",
+            "/help - xem danh sách lệnh",
         ],
     )
 
@@ -31,9 +61,9 @@ def build_help_message() -> str:
     """Build the /help response."""
     return "\n".join(
         [
-            "StockTrace commands:",
-            "/status - system status",
-            "/help - show commands",
+            "Các lệnh StockTrace:",
+            "/status - trạng thái hệ thống",
+            "/help - xem danh sách lệnh",
             "",
             "/add SYMBOL",
             "/remove SYMBOL",
@@ -41,9 +71,9 @@ def build_help_message() -> str:
             "/price SYMBOL",
             "/news SYMBOL",
             "/analysis SYMBOL",
-            "/market - market analysis",
+            "/market - phân tích thị trường",
             "",
-            "Financial Analysis:",
+            "Phân tích tài chính:",
             "/financial SYMBOL PERIOD (e.g. FPT 1Y)",
             "/report SYMBOL",
             "/valuation SYMBOL",
@@ -52,6 +82,12 @@ def build_help_message() -> str:
             "/debt SYMBOL",
             "/cashflow SYMBOL",
             "/compare SYMBOL1 SYMBOL2",
+            "",
+            "Theo dõi diễn biến:",
+            "/trace SYMBOL",
+            "/why SYMBOL",
+            "/signals SYMBOL",
+            "/risks SYMBOL",
         ],
     )
 
@@ -61,14 +97,14 @@ def build_status_message(settings: Settings) -> str:
     database_backend = "SQLite" if settings.database.is_sqlite else "PostgreSQL"
     return "\n".join(
         [
-            "StockTrace status",
-            f"Service: {settings.app.name}",
-            f"Version: {settings.app.version}",
-            f"Environment: {settings.environment.value}",
-            f"Database: {database_backend}",
-            f"Redis enabled: {settings.redis.enabled}",
-            f"AI enabled: {settings.ai.enabled}",
-            "Telegram: connected",
+            "Trạng thái StockTrace",
+            f"Dịch vụ: {settings.app.name}",
+            f"Phiên bản: {settings.app.version}",
+            f"Môi trường: {settings.environment.value}",
+            f"Cơ sở dữ liệu: {database_backend}",
+            f"Redis đã bật: {settings.redis.enabled}",
+            f"AI đã bật: {settings.ai.enabled}",
+            "Telegram: đã kết nối",
         ],
     )
 
@@ -76,22 +112,22 @@ def build_status_message(settings: Settings) -> str:
 def build_watchlist_message(items: Sequence[WatchlistItem]) -> str:
     """Build the /list response."""
     if not items:
-        return "Watchlist is empty. Use /add SYMBOL to add one."
+        return "Danh sách theo dõi đang trống. Dùng /add MA để thêm mã."
 
     symbols = "\n".join(f"{index}. {item.symbol}" for index, item in enumerate(items, start=1))
-    return "\n".join(["Watchlist:", symbols])
+    return "\n".join(["Danh sách theo dõi:", symbols])
 
 
 def build_added_message(symbol: str) -> str:
     """Build the /add response."""
-    return f"Added {symbol} to watchlist."
+    return f"Đã thêm {symbol} vào danh sách theo dõi."
 
 
 def build_removed_message(symbol: str, removed: bool) -> str:
     """Build the /remove response."""
     if removed:
-        return f"Removed {symbol} from watchlist."
-    return f"{symbol} was not in watchlist."
+        return f"Đã xóa {symbol} khỏi danh sách theo dõi."
+    return f"{symbol} không có trong danh sách theo dõi."
 
 
 def build_price_message(quote: StockQuote) -> str:
@@ -109,9 +145,9 @@ def build_news_message(symbol: str, articles: Sequence[NewsArticle]) -> str:
     """Build the /news response."""
     clean_symbol = escape(symbol)
     if not articles:
-        return f"No recent news found for {clean_symbol}."
+        return f"Không tìm thấy tin tức gần đây cho {clean_symbol}."
 
-    lines = [f"News for {clean_symbol}:"]
+    lines = [f"Tin tức về {clean_symbol}:"]
     for index, article in enumerate(articles, start=1):
         title = escape(article.title)
         url = escape(article.url)
@@ -130,7 +166,7 @@ def build_ai_news_section(analysis: StockAnalysisResult) -> str:
     """Build the AI analysis section for /news."""
     return "\n".join(
         [
-            "🤖 AI ANALYSIS",
+            "🤖 PHÂN TÍCH AI",
             "",
             f"Tổng quan:\n{escape(analysis.overview)}",
             "",
@@ -145,14 +181,18 @@ def build_ai_news_section(analysis: StockAnalysisResult) -> str:
 
 def build_full_analysis_message(bundle: AnalysisBundle) -> str:
     """Build the /analysis command response."""
-    from stocktrace.infrastructure.telegram.formatters import build_professional_analysis_report
+    from stocktrace.infrastructure.telegram.formatters import (  # noqa: PLC0415
+        build_professional_analysis_report,
+    )
 
     return build_professional_analysis_report(bundle)
 
 
 def build_market_message(bundle: MarketAnalysisBundle) -> str:
     """Build the /market command response."""
-    from stocktrace.infrastructure.telegram.formatters import build_market_analysis_report
+    from stocktrace.infrastructure.telegram.formatters import (  # noqa: PLC0415
+        build_market_analysis_report,
+    )
 
     return build_market_analysis_report(bundle)
 
@@ -194,7 +234,11 @@ def _trend_label(change_percent: Decimal) -> str:
 
 
 def _format_decimal(value: Decimal) -> str:
-    normalized = value.quantize(Decimal("0.01")) if value.as_tuple().exponent < -2 else value
+    normalized = (
+        value.quantize(Decimal("0.01"))
+        if value.as_tuple().exponent < _MAX_DECIMAL_PLACES
+        else value
+    )
     return f"{normalized:,}"
 
 

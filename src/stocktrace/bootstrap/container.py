@@ -30,6 +30,8 @@ from stocktrace.application.services.health import HealthCheckService
 from stocktrace.application.services.market_analysis_service import MarketAnalysisService
 from stocktrace.application.services.market_data import MarketDataService
 from stocktrace.application.services.stock_analysis_service import StockAnalysisService
+from stocktrace.application.services.trace import TraceService
+from stocktrace.application.services.trace.trace_service import TraceRepository
 from stocktrace.application.services.watchlist import WatchlistService
 from stocktrace.domain.ports.ai_cache import AICache
 from stocktrace.domain.ports.market_data_cache import MarketDataCache
@@ -40,11 +42,13 @@ from stocktrace.infrastructure.cache.memory_ai_cache import InMemoryAICache
 from stocktrace.infrastructure.cache.redis import RedisMarketDataCache
 from stocktrace.infrastructure.cache.redis_ai_cache import RedisAICache
 from stocktrace.infrastructure.config import Settings, get_settings
-from stocktrace.infrastructure.db.repositories import SqlAlchemyWatchlistRepository
+from stocktrace.infrastructure.db.repositories import (
+    SqlAlchemyTraceRepository,
+    SqlAlchemyWatchlistRepository,
+)
 from stocktrace.infrastructure.db.session import SessionManager
 from stocktrace.infrastructure.news.yahoo import YahooFinanceNewsProvider
 from stocktrace.infrastructure.providers.financial.composite import CompositeFinancialProvider
-from stocktrace.infrastructure.providers.financial.mock_provider import MockFinancialProvider
 from stocktrace.infrastructure.providers.financial.vnstock_provider import VNStockFinancialProvider
 from stocktrace.infrastructure.providers.yahoo import YahooFinanceQuoteProvider
 from stocktrace.infrastructure.providers.yahoo_historical import YahooHistoricalProvider
@@ -74,14 +78,12 @@ class Container:
         self._financial_provider: CompositeFinancialProvider | None = None
         self._financial_analysis_service: FinancialAnalysisService | None = None
         self._ai_financial_service: AIFinancialAnalysisService | None = None
+        self._trace_service: TraceService | None = None
 
     def financial_provider(self) -> CompositeFinancialProvider:
         """Build composite financial data provider."""
         if self._financial_provider is None:
-            providers = [
-                VNStockFinancialProvider(),
-                MockFinancialProvider(),
-            ]
+            providers = [VNStockFinancialProvider()]
             self._financial_provider = CompositeFinancialProvider(providers=providers)
         return self._financial_provider
 
@@ -144,6 +146,15 @@ class Container:
     def watchlist_service(self) -> WatchlistService:
         """Build the watchlist service."""
         return WatchlistService(repository_context_factory=self._watchlist_repository)
+
+    def trace_service(self) -> TraceService:
+        """Build the trace engine service."""
+        if self._trace_service is None:
+            self._trace_service = TraceService(
+                repository_context_factory=self._trace_repository,
+                financial_analysis_service=self.financial_analysis_service(),
+            )
+        return self._trace_service
 
     def market_data_service(self) -> MarketDataService:
         """Build the market data service."""
@@ -300,6 +311,11 @@ class Container:
     async def _watchlist_repository(self) -> AsyncIterator[WatchlistRepository]:
         async with self._session_manager.session() as session:
             yield SqlAlchemyWatchlistRepository(session=session)
+
+    @asynccontextmanager
+    async def _trace_repository(self) -> AsyncIterator[TraceRepository]:
+        async with self._session_manager.session() as session:
+            yield SqlAlchemyTraceRepository(session=session)
 
 
 @lru_cache(maxsize=1)

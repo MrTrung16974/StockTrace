@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from math import ceil
+
 from stocktrace.domain.entities.financial import (
     BalanceSheet,
     CashFlow,
@@ -39,7 +41,7 @@ class MockFinancialProvider:
 
         return [
             build_income_statement(symbol, q[0], q[1], q[2], q[3], q[4])
-            for q in data["quarters"]
+            for q in _select_quarters(data["quarters"], period)
         ]
 
     async def get_balance_sheet(
@@ -54,7 +56,7 @@ class MockFinancialProvider:
 
         return [
             build_balance_sheet(symbol, q[0], q[1], q[2])
-            for q in data["quarters"]
+            for q in _select_quarters(data["quarters"], period)
         ]
 
     async def get_cash_flow(
@@ -69,7 +71,7 @@ class MockFinancialProvider:
 
         return [
             build_cash_flow(symbol, q[0], q[1], q[4], q[3])
-            for q in data["quarters"]
+            for q in _select_quarters(data["quarters"], period)
         ]
 
     async def get_ratios(
@@ -85,3 +87,9 @@ class MockFinancialProvider:
             msg = f"No company data for {symbol}"
             raise FinancialDataNotFoundError(msg)
         return result
+
+
+def _select_quarters(quarters: list[tuple], period: FinancialPeriod) -> list[tuple]:
+    """Return only the requested trailing number of quarterly observations."""
+    requested_quarters = ceil(period.months / 3)
+    return quarters[-requested_quarters:]

@@ -174,7 +174,7 @@ class AIFinancialAnalysisService:
         target_text = _parse_section(content, "TARGET_PRICE")
 
         return FinancialAnalysisLLMResult(
-            executive_summary=exec_summary or "Analysis unavailable.",
+            executive_summary=exec_summary or "Chưa có phân tích AI.",
             strengths=strengths,
             weaknesses=weaknesses,
             opportunities=opportunities,
@@ -198,14 +198,12 @@ class AIFinancialAnalysisService:
                 risks.extend(sig.reasons)
 
         latest = analysis.ratios[-1] if analysis.ratios else None
-        summary_parts = [
-            f"{analysis.company_name} maintains",
-        ]
+        summary_parts = [f"{analysis.company_name} đang duy trì"]
         if latest and latest.revenue_growth and latest.revenue_growth > 0:
-            summary_parts.append("strong growth momentum,")
+            summary_parts.append("đà tăng trưởng tích cực,")
         if latest and latest.roe and latest.roe > Decimal("15"):
-            summary_parts.append("high profitability and")
-        summary_parts.append("healthy financial metrics.")
+            summary_parts.append("khả năng sinh lời cao và")
+        summary_parts.append("các chỉ số tài chính tương đối lành mạnh.")
         executive = " ".join(summary_parts)
 
         confidence = Decimal(str(min(99, max(50, int(float(score.overall_score) * 10)))))

@@ -6,6 +6,7 @@ from decimal import Decimal
 
 from stocktrace.domain.entities.financial import (
     CategoryScore,
+    FinancialProfile,
     FinancialRatio,
     FinancialScore,
     Recommendation,
@@ -48,15 +49,25 @@ class FinancialScoringEngine:
         period: str,
         ratios: list[FinancialRatio],
         valuation: Valuation | None = None,
+        *,
+        profile: FinancialProfile = FinancialProfile.GENERAL,
+        investment_ready: bool = True,
     ) -> FinancialScore:
         """Calculate composite financial score from ratios."""
         latest = ratios[-1] if ratios else None
 
-        growth = self._score_growth(latest, ratios)
-        profitability = self._score_profitability(latest)
-        debt = self._score_debt(latest)
-        cash_flow = self._score_cash_flow(latest)
-        val_score = self._score_valuation(latest, valuation)
+        if profile == FinancialProfile.BANK:
+            growth = self._score_bank_growth(latest)
+            profitability = self._score_bank_profitability(latest)
+            debt = Decimal("50")
+            cash_flow = Decimal("50")
+            val_score = self._score_bank_valuation(latest, valuation)
+        else:
+            growth = self._score_growth(latest, ratios)
+            profitability = self._score_profitability(latest)
+            debt = self._score_debt(latest)
+            cash_flow = self._score_cash_flow(latest)
+            val_score = self._score_valuation(latest, valuation)
 
         categories = (
             CategoryScore("Growth", growth, WEIGHTS["growth"], growth * WEIGHTS["growth"]),
@@ -88,7 +99,9 @@ class FinancialScoringEngine:
             symbol=symbol,
             period=period,
             overall_score=overall,
-            recommendation=_score_to_recommendation(overall),
+            recommendation=(
+                _score_to_recommendation(overall) if investment_ready else Recommendation.HOLD
+            ),
             growth_score=(growth / Decimal("10")).quantize(Decimal("0.1")),
             profitability_score=(profitability / Decimal("10")).quantize(Decimal("0.1")),
             debt_score=(debt / Decimal("10")).quantize(Decimal("0.1")),
@@ -96,6 +109,44 @@ class FinancialScoringEngine:
             valuation_score=(val_score / Decimal("10")).quantize(Decimal("0.1")),
             categories=categories,
         )
+
+    def _score_bank_growth(self, latest: FinancialRatio | None) -> Decimal:
+        if latest is None or latest.profit_growth is None:
+            return Decimal("50")
+        if latest.profit_growth > Decimal("20"):
+            return Decimal("80")
+        if latest.profit_growth > Decimal("10"):
+            return Decimal("65")
+        if latest.profit_growth > Decimal("0"):
+            return Decimal("55")
+        return Decimal("35")
+
+    def _score_bank_profitability(self, latest: FinancialRatio | None) -> Decimal:
+        if latest is None:
+            return Decimal("50")
+        score = Decimal("50")
+        if latest.roe is not None:
+            score += Decimal("25") if latest.roe > Decimal("18") else Decimal("10")
+        if latest.roa is not None:
+            score += Decimal("15") if latest.roa > Decimal("1.5") else Decimal("5")
+        return _clamp_score(score)
+
+    def _score_bank_valuation(
+        self,
+        latest: FinancialRatio | None,
+        valuation: Valuation | None,
+    ) -> Decimal:
+        score = Decimal("50")
+        if valuation is not None and valuation.status.value == "UNDERVALUED":
+            score += Decimal("20")
+        elif valuation is not None and valuation.status.value == "OVERVALUED":
+            score -= Decimal("20")
+        if latest is not None and latest.pb is not None:
+            if latest.pb < Decimal("1"):
+                score += Decimal("15")
+            elif latest.pb > Decimal("2.5"):
+                score -= Decimal("15")
+        return _clamp_score(score)
 
     def _score_growth(
         self,

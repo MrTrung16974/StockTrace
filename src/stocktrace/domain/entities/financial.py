@@ -46,6 +46,13 @@ class SignalLevel(StrEnum):
     RED = "red"
 
 
+class FinancialProfile(StrEnum):
+    """Industry-specific framework used for financial interpretation."""
+
+    GENERAL = "general"
+    BANK = "bank"
+
+
 @dataclass(frozen=True, slots=True)
 class IncomeStatement:
     """Quarterly or annual income statement."""
@@ -62,6 +69,7 @@ class IncomeStatement:
     net_income: Decimal
     eps: Decimal
     currency: str = "VND"
+    profile: FinancialProfile = FinancialProfile.GENERAL
 
 
 @dataclass(frozen=True, slots=True)
@@ -211,6 +219,18 @@ class CompanyFundamental:
     market_cap: Decimal | None = None
     shares_outstanding: Decimal | None = None
     revenue_segments: tuple[RevenueSegment, ...] = ()
+    data_source: str = "unknown"
+    is_mock_data: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class FinancialDataQuality:
+    """Evidence and validation status for a financial analysis."""
+
+    score: Decimal
+    is_ready_for_analysis: bool
+    is_ready_for_investment_signal: bool
+    issues: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -281,9 +301,10 @@ class FinancialAnalysis:
     score: FinancialScore
     valuation: Valuation
     fundamentals: CompanyFundamental
+    quality: FinancialDataQuality
     ai_analysis: AIFinancialAnalysis | None = None
     signals: tuple[FinancialSignal, ...] = ()
-    generated_at: datetime = field(default_factory=lambda: datetime.now())
+    generated_at: datetime = field(default_factory=datetime.now)
 
 
 @dataclass(frozen=True, slots=True)
