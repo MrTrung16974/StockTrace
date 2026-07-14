@@ -15,6 +15,7 @@ from stocktrace.application.services.financial.financial_analysis_service import
 )
 from stocktrace.application.services.market_analysis_service import MarketAnalysisService
 from stocktrace.application.services.market_data import MarketDataError, MarketDataService
+from stocktrace.application.services.news_quality import select_recent_unique_news
 from stocktrace.application.services.stock_analysis_service import StockAnalysisService
 from stocktrace.application.services.trace import TraceService
 from stocktrace.application.services.watchlist import (
@@ -310,7 +311,7 @@ def create_router(  # noqa: PLR0915
 
         await message.answer(build_price_message(quote))
 
-    @router.message(Command("news"))
+    @router.message(Command("news", "new"))
     async def news(message: Message, command: CommandObject) -> None:
         if not is_authorized_user(message.from_user, settings.telegram):
             await reject_unauthorized(message)
@@ -333,6 +334,7 @@ def create_router(  # noqa: PLR0915
                     command.args,
                     limit=_DEFAULT_NEWS_LIMIT,
                 )
+                articles = select_recent_unique_news(articles, limit=_DEFAULT_NEWS_LIMIT)
                 analysis = None
         except InvalidSymbolError as exc:
             await message.answer(str(exc))

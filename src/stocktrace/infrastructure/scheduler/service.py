@@ -20,14 +20,15 @@ from stocktrace.application.queries.stock_handlers import (
 )
 from stocktrace.application.queries.stock_queries import GetNewsQuery, GetPriceQuery
 from stocktrace.application.services.market_data import NewsArticle, StockQuote
+from stocktrace.application.services.policy_news_analysis import PolicyNewsAnalyzer
 from stocktrace.application.services.watchlist import WatchlistService
 from stocktrace.infrastructure.config import Settings
 from stocktrace.infrastructure.logging.config import get_logger
-from stocktrace.infrastructure.scheduler.market_hours import is_vn_market_open
-from stocktrace.infrastructure.scheduler.protocols import TelegramMessageBot
 from stocktrace.infrastructure.scheduler.financial_job import FinancialAnalysisJob
 from stocktrace.infrastructure.scheduler.market_analysis_job import MarketAnalysisJob
+from stocktrace.infrastructure.scheduler.market_hours import is_vn_market_open
 from stocktrace.infrastructure.scheduler.price_alert_job import PriceAlertJob
+from stocktrace.infrastructure.scheduler.protocols import TelegramMessageBot
 from stocktrace.infrastructure.scheduler.stock_analysis_job import StockAnalysisJob
 
 T = TypeVar("T")
@@ -50,6 +51,7 @@ class SchedulerService:
         market_analysis_job: MarketAnalysisJob | None = None,
         financial_analysis_job: FinancialAnalysisJob | None = None,
         price_alert_job: PriceAlertJob | None = None,
+        policy_news_analyzer: PolicyNewsAnalyzer | None = None,
     ) -> None:
         self._quote_handler = quote_handler
         self._news_handler = news_handler
@@ -60,6 +62,7 @@ class SchedulerService:
         self._market_analysis_job = market_analysis_job
         self._financial_analysis_job = financial_analysis_job
         self._price_alert_job = price_alert_job
+        self._policy_news_analyzer = policy_news_analyzer or PolicyNewsAnalyzer()
         self._timezone = ZoneInfo(settings.scheduler.timezone)
         self._scheduler = scheduler or AsyncIOScheduler(timezone=self._timezone)
         self._logger = get_logger(__name__)
@@ -166,6 +169,19 @@ class SchedulerService:
             has_job = True
 
         if self._financial_analysis_job is not None:
+            if self._settings.scheduler.financial_daily_report_enabled:
+                self._scheduler.add_job(
+                    self._financial_analysis_job.send_daily_financial_reports,
+                    CronTrigger(
+                        hour=self._settings.scheduler.financial_daily_report_hour,
+                        minute=0,
+                        timezone=self._timezone,
+                    ),
+                    id="stocktrace-financial-daily-report",
+                    replace_existing=True,
+                    max_instances=1,
+                    coalesce=True,
+                )
             self._scheduler.add_job(
                 self._financial_analysis_job.sync_financial_statements,
                 CronTrigger(day_of_week="sun", hour=2, minute=0, timezone=self._timezone),
@@ -367,6 +383,12 @@ class SchedulerService:
             title = escape(article.title)
             url = escape(article.url)
             source = escape(article.source)
+            policy_impact = self._policy_news_analyzer.analyze(article)
+            if policy_impact is not None:
+                source = (
+                    f"{source}<br/>🏛 {escape(policy_impact.label)} — "
+                    f"{escape(policy_impact.reason)}"
+                )
             lines.append(f'{index}. <a href="{url}">{title}</a>')
             lines.append(f"   {source} • {_age_label(article.published_at, now)}")
             lines.append("")

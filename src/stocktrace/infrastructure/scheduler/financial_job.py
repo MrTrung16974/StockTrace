@@ -55,6 +55,33 @@ class FinancialAnalysisJob:
         """Monthly: recalculate valuations for watchlist."""
         await self.sync_financial_statements()
 
+    async def send_daily_financial_reports(self) -> None:
+        """Send the latest one-year financial dashboard for every watched symbol."""
+        chat_id = self._settings.telegram.chat_id
+        if chat_id is None:
+            return
+
+        items = await self._watchlist.list_symbols(owner_id=str(chat_id))
+        period = FinancialPeriod.parse("1Y")
+
+        for item in items:
+            try:
+                dashboard = await self._financial.analyze(item.symbol, period)
+                message = await self._bot.send_message(
+                    chat_id=chat_id,
+                    text=f"📊 Phân tích tài chính 09:00: <b>{item.symbol}</b>",
+                    parse_mode="HTML",
+                    disable_web_page_preview=True,
+                )
+                await deliver_html_messages(message, dashboard.telegram_html)
+                self._logger.info("daily_financial_report_sent", symbol=item.symbol)
+            except Exception as exc:
+                self._logger.warning(
+                    "daily_financial_report_failed",
+                    symbol=item.symbol,
+                    error=str(exc),
+                )
+
     async def refresh_quarterly_reports(self) -> None:
         """Quarterly: refresh full financial reports."""
         chat_id = self._settings.telegram.chat_id

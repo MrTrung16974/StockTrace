@@ -26,6 +26,7 @@ from stocktrace.application.services.market_data import (
     StockQuote,
 )
 from stocktrace.application.services.news_analysis_service import NewsAnalysisService, NewsSentimentResult
+from stocktrace.application.services.news_quality import select_recent_unique_news
 from stocktrace.application.services.stock_score_service import StockScore, StockScoreService
 from stocktrace.application.services.technical_analysis_service import (
     TechnicalAnalysisService,
@@ -206,6 +207,7 @@ class StockAnalysisService:
         """Fetch news, optionally translate, and run AI analysis."""
         normalized = symbol.strip().upper()
         articles = await self._news_handler.handle(GetNewsQuery(symbol=normalized, limit=limit))
+        articles = select_recent_unique_news(articles, limit=limit)
         articles = await self._maybe_translate(normalized, articles)
         analysis = await self.analyze_news(normalized, articles, include_price=True)
         return articles, analysis

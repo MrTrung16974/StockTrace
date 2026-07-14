@@ -20,5 +20,10 @@ stock:
       - "20:00"
     limit: 5
 
+  financial:
+    daily_report:
+      enabled: true
+      hour: 9
+
 telegram:
   chat_id: "replace-me"

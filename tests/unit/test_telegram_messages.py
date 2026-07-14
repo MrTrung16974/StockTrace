@@ -33,6 +33,7 @@ def test_build_help_message_mentions_future_commands() -> None:
 
     assert "/add SYMBOL" in message
     assert "/news SYMBOL" in message
+    assert "/new SYMBOL" in message
     assert "/analysis SYMBOL" in message
     assert "/financial SYMBOL PERIOD" in message
     assert "/trace SYMBOL" in message
@@ -42,7 +43,7 @@ def test_build_help_message_mentions_future_commands() -> None:
 def test_bot_command_specs_include_trace_and_financial_commands() -> None:
     commands = {command for command, _ in build_bot_command_specs()}
 
-    assert {"financial", "trace", "why", "signals", "risks"}.issubset(commands)
+    assert {"financial", "new", "trace", "why", "signals", "risks"}.issubset(commands)
 
 
 def test_build_status_message_uses_settings() -> None:
@@ -111,11 +112,14 @@ def test_build_news_message_lists_articles_and_escapes_html() -> None:
         ],
     )
 
-    assert "Tin tức về FPT:" in message
+    assert "Tin tức đã lọc — FPT" in message
+    assert "Nguồn: Yahoo Finance" in message
+    assert "chưa xác minh thời điểm xuất bản" in message
     assert '<a href="https://example.com/news?a=1&amp;b=2">FPT &amp; market update</a>' in message
 
 
 def test_build_news_message_handles_empty_articles() -> None:
-    assert build_news_message(symbol="FPT", articles=[]) == (
-        "Không tìm thấy tin tức gần đây cho FPT."
+    assert "Không có tin mới trong 7 ngày gần đây cho FPT." in build_news_message(
+        symbol="FPT",
+        articles=[],
     )

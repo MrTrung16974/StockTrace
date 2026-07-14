@@ -275,7 +275,7 @@ def test_build_ai_news_section_format() -> None:
         AnalysisMode.NEWS_ONLY,
     )
     section = build_ai_news_section(result)
-    assert "🤖 AI ANALYSIS" in section
+    assert "🤖 PHÂN TÍCH AI" in section
     assert "Tổng quan test" in section
     assert "Ngắn hạn test" in section
 
@@ -289,7 +289,7 @@ def test_append_ai_news_section_preserves_original_news() -> None:
     )
     combined = append_ai_news_section(original, result)
     assert combined.startswith(original)
-    assert "🤖 AI ANALYSIS" in combined
+    assert "🤖 PHÂN TÍCH AI" in combined
 
 
 def test_build_full_analysis_message_includes_price_and_ai() -> None:

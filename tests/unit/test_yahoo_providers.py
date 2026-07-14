@@ -242,6 +242,33 @@ async def test_vietnam_news_provider_filters_unrelated_and_old_google_results() 
 
 @pytest.mark.asyncio
 @respx.mock
+async def test_vietnam_news_provider_accepts_official_policy_source() -> None:
+    respx.get("https://news.google.com/rss/search").mock(
+        return_value=Response(
+            200,
+            text="""<?xml version="1.0"?>
+            <rss version="2.0">
+              <channel>
+                <item>
+                  <title>MBB quyet dinh dieu chinh lai suat</title>
+                  <link>https://news.google.com/rss/articles/example</link>
+                  <source>Ngân hàng Nhà nước Việt Nam</source>
+                  <pubDate>Tue, 02 Jun 2026 10:00:00 GMT</pubDate>
+                </item>
+              </channel>
+            </rss>""",
+        ),
+    )
+
+    provider = YahooFinanceNewsProvider(timeout_seconds=1)
+    articles = await provider.get_news("MBB", limit=5)
+
+    assert len(articles) == 1
+    assert articles[0].source == "Ngân hàng Nhà nước Việt Nam"
+
+
+@pytest.mark.asyncio
+@respx.mock
 async def test_yahoo_news_provider_returns_empty_when_all_sources_fail() -> None:
     respx.get("https://feeds.finance.yahoo.com/rss/2.0/headline").mock(
         side_effect=[Response(404), Response(404)],

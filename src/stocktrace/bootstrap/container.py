@@ -42,6 +42,7 @@ from stocktrace.infrastructure.cache.memory_ai_cache import InMemoryAICache
 from stocktrace.infrastructure.cache.redis import RedisMarketDataCache
 from stocktrace.infrastructure.cache.redis_ai_cache import RedisAICache
 from stocktrace.infrastructure.config import Settings, get_settings
+from stocktrace.infrastructure.config.settings import Environment
 from stocktrace.infrastructure.db.repositories import (
     SqlAlchemyTraceRepository,
     SqlAlchemyWatchlistRepository,
@@ -49,6 +50,7 @@ from stocktrace.infrastructure.db.repositories import (
 from stocktrace.infrastructure.db.session import SessionManager
 from stocktrace.infrastructure.news.yahoo import YahooFinanceNewsProvider
 from stocktrace.infrastructure.providers.financial.composite import CompositeFinancialProvider
+from stocktrace.infrastructure.providers.financial.mock_provider import MockFinancialProvider
 from stocktrace.infrastructure.providers.financial.vnstock_provider import VNStockFinancialProvider
 from stocktrace.infrastructure.providers.yahoo import YahooFinanceQuoteProvider
 from stocktrace.infrastructure.providers.yahoo_historical import YahooHistoricalProvider
@@ -83,7 +85,11 @@ class Container:
     def financial_provider(self) -> CompositeFinancialProvider:
         """Build composite financial data provider."""
         if self._financial_provider is None:
-            providers = [VNStockFinancialProvider()]
+            providers = (
+                [MockFinancialProvider()]
+                if self._settings.environment is Environment.TEST
+                else [VNStockFinancialProvider()]
+            )
             self._financial_provider = CompositeFinancialProvider(providers=providers)
         return self._financial_provider
 

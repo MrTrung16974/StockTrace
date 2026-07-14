@@ -150,6 +150,8 @@ class SchedulerSettings(BaseModel):
     analysis_symbols: list[str] = Field(default_factory=list)
     morning_report_hour: int = Field(default=8, ge=0, le=23)
     evening_report_hour: int = Field(default=20, ge=0, le=23)
+    financial_daily_report_enabled: bool = True
+    financial_daily_report_hour: int = Field(default=9, ge=0, le=23)
     market_analysis_enabled: bool = False
     market_morning_report_hour: int = Field(default=7, ge=0, le=23)
     market_evening_report_hour: int = Field(default=19, ge=0, le=23)

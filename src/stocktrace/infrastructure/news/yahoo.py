@@ -39,6 +39,38 @@ VIETNAM_SOURCE_KEYWORDS = {
     "tinnhanhchungkhoan",
     "tin nhanh chứng khoán",
 }
+OFFICIAL_POLICY_SOURCE_DOMAINS = {
+    "chinhphu.vn",
+    "ssc.gov.vn",
+    "sbv.gov.vn",
+    "mof.gov.vn",
+    "moj.gov.vn",
+    "hose.vn",
+    "hnx.vn",
+    "vnx.vn",
+}
+OFFICIAL_POLICY_SOURCE_NAMES = {
+    "chính phủ",
+    "ủy ban chứng khoán",
+    "ngân hàng nhà nước",
+    "bộ tài chính",
+    "bộ tư pháp",
+    "sở giao dịch chứng khoán thành phố hồ chí minh",
+    "sở giao dịch chứng khoán hà nội",
+    "sở giao dịch chứng khoán việt nam",
+}
+POLICY_KEYWORDS = {
+    "quyet dinh",
+    "lai suat",
+    "nghị định",
+    "thông tư",
+    "quyết định",
+    "chính sách",
+    "quy định",
+    "xử phạt",
+    "thanh tra",
+    "lãi suất",
+}
 MARKET_KEYWORDS = {
     "co phieu",
     "cổ phiếu",
@@ -219,12 +251,13 @@ def _google_news_query(symbol: str) -> str:
     )
     alias_terms = " OR ".join(f'"{alias}"' for alias in aliases)
     company_part = f" OR {alias_terms}" if alias_terms else ""
+    policy_sources = " OR ".join(f"site:{domain}" for domain in OFFICIAL_POLICY_SOURCE_DOMAINS)
     return (
         f"({symbol_terms}{company_part}) "
         "(cổ phiếu OR chứng khoán OR HOSE OR VN-Index) "
-        "(CafeF OR Vietstock OR VnEconomy OR VietnamBiz OR "
+        "((CafeF OR Vietstock OR VnEconomy OR VietnamBiz OR "
         '"Người Quan Sát" OR "Tin nhanh chứng khoán" OR "Báo Đầu Tư") '
-        f"when:{MAX_NEWS_AGE_DAYS}d"
+        f"OR {policy_sources}) when:{MAX_NEWS_AGE_DAYS}d"
     )
 
 
@@ -250,7 +283,15 @@ def _is_relevant_vietnam_market_article(
 
     has_market_context = any(keyword in text for keyword in MARKET_KEYWORDS)
     has_vietnam_source = any(keyword in text for keyword in VIETNAM_SOURCE_KEYWORDS)
-    return has_market_context or has_vietnam_source
+    host = _url_host(url).lower()
+    has_official_policy_source = any(
+        host == domain or host.endswith(f".{domain}") or domain in source.lower()
+        for domain in OFFICIAL_POLICY_SOURCE_DOMAINS
+    ) or any(name in source.lower() for name in OFFICIAL_POLICY_SOURCE_NAMES)
+    has_policy_context = any(keyword in text for keyword in POLICY_KEYWORDS)
+    return has_market_context or has_vietnam_source or (
+        has_official_policy_source and has_policy_context
+    )
 
 
 def _url_host(url: str) -> str:

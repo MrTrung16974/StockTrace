@@ -3,18 +3,34 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from datetime import UTC, datetime
 from decimal import Decimal
 from html import escape
 
 from stocktrace.ai.models import StockAnalysisResult
 from stocktrace.application.services.market_analysis_service import MarketAnalysisBundle
 from stocktrace.application.services.market_data import NewsArticle, StockQuote
+from stocktrace.application.services.policy_news_analysis import PolicyNewsAnalyzer
 from stocktrace.application.services.stock_analysis_service import AnalysisBundle
 from stocktrace.domain.entities.watchlist_item import WatchlistItem
 from stocktrace.infrastructure.config import Settings
 
 BotCommandSpec = tuple[str, str]
 _MAX_DECIMAL_PLACES = -2
+_MINUTES_PER_HOUR = 60
+_HOURS_PER_DAY = 24
+_POLICY_NEWS_ANALYZER = PolicyNewsAnalyzer()
+_FINANCIAL_NEWS_SOURCES = (
+    "cafef",
+    "vietstock",
+    "vneconomy",
+    "vietnambiz",
+    "vietcap",
+    "ssi",
+    "vnexpress",
+    "reuters",
+    "bloomberg",
+)
 
 
 def build_bot_command_specs() -> tuple[BotCommandSpec, ...]:
@@ -27,6 +43,7 @@ def build_bot_command_specs() -> tuple[BotCommandSpec, ...]:
         ("list", "xem danh sách theo dõi"),
         ("price", "giá mới nhất"),
         ("news", "tin tức mới nhất"),
+        ("new", "tin tức đã lọc, có nguồn"),
         ("analysis", "phân tích cổ phiếu bằng AI"),
         ("market", "phân tích thị trường"),
         ("financial", "phân tích tài chính"),
@@ -70,6 +87,7 @@ def build_help_message() -> str:
             "/list",
             "/price SYMBOL",
             "/news SYMBOL",
+            "/new SYMBOL (bí danh của /news)",
             "/analysis SYMBOL",
             "/market - phân tích thị trường",
             "",
@@ -142,17 +160,51 @@ def build_price_message(quote: StockQuote) -> str:
 
 
 def build_news_message(symbol: str, articles: Sequence[NewsArticle]) -> str:
-    """Build the /news response."""
+    """Build a source-aware /news response."""
     clean_symbol = escape(symbol)
     if not articles:
-        return f"Không tìm thấy tin tức gần đây cho {clean_symbol}."
+        return (
+            f"Không có tin mới trong 7 ngày gần đây cho {clean_symbol}. "
+            "Để tránh tin cũ hoặc trùng lặp, hệ thống không hiển thị các bài đó."
+        )
 
-    lines = [f"Tin tức về {clean_symbol}:"]
+    now = datetime.now(tz=UTC)
+    lines = [
+        f"📰 Tin tức đã lọc — {clean_symbol}",
+        "Chỉ hiển thị tin mới, không trùng lặp. Nhãn tác động không phải khuyến nghị giao dịch.",
+        "",
+    ]
     for index, article in enumerate(articles, start=1):
         title = escape(article.title)
         url = escape(article.url)
+        source = escape(article.source)
         lines.append(f'{index}. <a href="{url}">{title}</a>')
+        lines.append(f"   Nguồn: {source} · {_published_label(article.published_at, now)}")
+        policy_impact = _POLICY_NEWS_ANALYZER.analyze(article)
+        if policy_impact is not None:
+            lines.append(f"   🏛 {escape(policy_impact.label)} — {escape(policy_impact.reason)}")
+        else:
+            lines.append(f"   Độ tin cậy nguồn: {_source_quality_label(article)}")
     return "\n".join(lines)
+
+
+def _published_label(published_at: datetime | None, now: datetime) -> str:
+    if published_at is None:
+        return "chưa xác minh thời điểm xuất bản"
+    timestamp = published_at.replace(tzinfo=UTC) if published_at.tzinfo is None else published_at
+    minutes = max(0, int((now - timestamp.astimezone(UTC)).total_seconds() // 60))
+    if minutes < _MINUTES_PER_HOUR:
+        return f"{minutes} phút trước"
+    if minutes < _HOURS_PER_DAY * _MINUTES_PER_HOUR:
+        return f"{minutes // _MINUTES_PER_HOUR} giờ trước"
+    return f"{minutes // (_HOURS_PER_DAY * _MINUTES_PER_HOUR)} ngày trước"
+
+
+def _source_quality_label(article: NewsArticle) -> str:
+    source = article.source.lower()
+    if any(name in source for name in _FINANCIAL_NEWS_SOURCES):
+        return "nguồn tin tài chính đã nhận diện"
+    return "nguồn tổng hợp — nên đối chiếu bài gốc"
 
 
 def append_ai_news_section(text: str, analysis: StockAnalysisResult | None) -> str:
