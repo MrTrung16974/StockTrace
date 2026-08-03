@@ -7,7 +7,7 @@ from datetime import datetime
 from decimal import Decimal
 from uuid import uuid4
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from stocktrace.domain.entities.trace import (
@@ -65,6 +65,8 @@ class SqlAlchemyTraceRepository:
 
     async def save_document(self, document: TraceDocument) -> None:
         """Persist a fetched source document."""
+        if document.checksum and await self.get_document_by_checksum(document.checksum):
+            return
         self._session.add(
             TraceDocumentModel(
                 id=str(uuid4()),
@@ -91,10 +93,32 @@ class SqlAlchemyTraceRepository:
 
     async def save_event(self, event: StockTraceEvent) -> None:
         """Persist a normalized trace event."""
+        duplicate = await self._session.execute(
+            select(TraceEventModel.id).where(
+                TraceEventModel.symbol == event.symbol,
+                TraceEventModel.event_type == event.event_type.value,
+                TraceEventModel.source_code == event.source.code,
+                TraceEventModel.source_url == event.source_url,
+                TraceEventModel.title == event.title,
+                TraceEventModel.occurred_at == event.occurred_at,
+            ).limit(1),
+        )
+        if duplicate.scalar_one_or_none() is not None:
+            return
+
         document_id = None
         if event.document is not None:
-            document_id = str(uuid4())
-            self._session.add(self._document_to_model(event.document, document_id))
+            existing_document_id = None
+            if event.document.checksum:
+                result = await self._session.execute(
+                    select(TraceDocumentModel.id).where(
+                        TraceDocumentModel.checksum == event.document.checksum,
+                    ).limit(1),
+                )
+                existing_document_id = result.scalar_one_or_none()
+            document_id = existing_document_id or str(uuid4())
+            if existing_document_id is None:
+                self._session.add(self._document_to_model(event.document, document_id))
 
         await self.upsert_source(event.source)
         self._session.add(
@@ -138,7 +162,9 @@ class SqlAlchemyTraceRepository:
         if event_types:
             stmt = stmt.where(TraceEventModel.event_type.in_([item.value for item in event_types]))
         if since is not None:
-            stmt = stmt.where(TraceEventModel.created_at >= since)
+            stmt = stmt.where(
+                func.coalesce(TraceEventModel.occurred_at, TraceEventModel.created_at) >= since,
+            )
 
         result = await self._session.execute(stmt)
         return [

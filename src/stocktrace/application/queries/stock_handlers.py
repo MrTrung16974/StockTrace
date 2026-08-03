@@ -84,7 +84,7 @@ class GetStockNewsQueryHandler:
         """Return news articles, using cache when possible. Emits audit events."""
         symbol = query.symbol.strip().upper()
 
-        if self._cache is not None:
+        if self._cache is not None and not query.force_refresh:
             try:
                 cached = await self._cache.get_news(symbol, query.limit)
             except Exception:

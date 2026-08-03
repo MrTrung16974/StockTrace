@@ -153,6 +153,7 @@ class SchedulerSettings(BaseModel):
     financial_daily_report_enabled: bool = True
     financial_daily_report_hour: int = Field(default=9, ge=0, le=23)
     market_analysis_enabled: bool = False
+    market_daily_report_hour: int = Field(default=16, ge=0, le=23)
     market_morning_report_hour: int = Field(default=7, ge=0, le=23)
     market_evening_report_hour: int = Field(default=19, ge=0, le=23)
 

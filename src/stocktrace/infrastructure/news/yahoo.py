@@ -16,6 +16,7 @@ from stocktrace.infrastructure.logging.config import get_logger
 MIN_VN_SYMBOL_LENGTH = 2
 MAX_VN_SYMBOL_LENGTH = 4
 MAX_NEWS_AGE_DAYS = 45
+FETCH_MULTIPLIER = 4
 VIETNAM_SOURCE_KEYWORDS = {
     "cafef",
     "vietstock",
@@ -106,17 +107,19 @@ class YahooFinanceNewsProvider:
 
     async def get_news(self, symbol: str, limit: int) -> list[NewsArticle]:
         """Return latest news articles for a symbol."""
+        fetch_limit = max(limit, limit * FETCH_MULTIPLIER)
         if _looks_like_vietnam_symbol(symbol):
-            articles = await self._fetch_google_news(symbol=symbol, limit=limit)
+            articles = await self._fetch_google_news(symbol=symbol, limit=fetch_limit)
             if articles:
-                return articles
+                return _latest_articles(articles, limit)
 
         for candidate in _candidate_symbols(symbol):
-            articles = await self._fetch_yahoo_news(candidate, ticker=symbol, limit=limit)
+            articles = await self._fetch_yahoo_news(candidate, ticker=symbol, limit=fetch_limit)
             if articles:
-                return articles
+                return _latest_articles(articles, limit)
 
-        return await self._fetch_google_news(symbol=symbol, limit=limit)
+        articles = await self._fetch_google_news(symbol=symbol, limit=fetch_limit)
+        return _latest_articles(articles, limit)
 
     async def _fetch_yahoo_news(
         self,
@@ -164,7 +167,7 @@ class YahooFinanceNewsProvider:
             ticker=symbol,
             source_fallback="Google News",
             limit=limit,
-            vietnamese_market_filter=True,
+            vietnamese_market_filter=_looks_like_vietnam_symbol(symbol),
         )
 
 
@@ -214,6 +217,19 @@ def _published_at(value: object) -> datetime | None:
     if not isinstance(value, struct_time):
         return None
     return datetime(*value[:6], tzinfo=UTC)
+
+
+def _latest_articles(articles: list[NewsArticle], limit: int) -> list[NewsArticle]:
+    """Sort dated articles newest-first while retaining undated fallbacks."""
+    floor = datetime.min.replace(tzinfo=UTC)
+
+    def key(article: NewsArticle) -> datetime:
+        value = article.published_at
+        if value is None:
+            return floor
+        return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
+
+    return sorted(articles, key=key, reverse=True)[:limit]
 
 
 def _source_name(value: object, fallback: str) -> str:

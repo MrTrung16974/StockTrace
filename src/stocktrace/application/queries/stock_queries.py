@@ -14,3 +14,4 @@ class GetNewsQuery:
     """Query intent: fetch recent news articles for a symbol."""
     symbol: str
     limit: int = 5
+    force_refresh: bool = False

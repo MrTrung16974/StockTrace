@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from decimal import Decimal
+from math import exp, log
 
 from stocktrace.domain.entities.trace import (
     StockTraceEvent,
@@ -24,6 +26,7 @@ _RISK_SEVERITIES = {
     TraceSeverity.CRITICAL,
 }
 _MIN_EVENTS_FOR_CHANGE_SCORE = 2
+_DEFAULT_HALF_LIFE_DAYS = Decimal("30")
 
 
 class TraceScoringEngine:
@@ -50,7 +53,8 @@ class TraceScoringEngine:
         for event in events:
             severity_weight = _SEVERITY_WEIGHTS[event.severity]
             source_weight = Decimal("1") if event.source.official else Decimal("0.6")
-            event_score = severity_weight * event.confidence * source_weight
+            recency_weight = self._recency_weight(event, now=datetime.now(UTC))
+            event_score = severity_weight * event.confidence * source_weight * recency_weight
             weighted_signal += event_score
             confidence_total += event.confidence * source_weight
             if event.severity in _RISK_SEVERITIES:
@@ -89,6 +93,19 @@ class TraceScoringEngine:
             return Decimal("0")
         total = sum((_SEVERITY_WEIGHTS[event.severity] for event in events), Decimal("0"))
         return total / Decimal(len(events))
+
+    def _recency_weight(self, event: StockTraceEvent, *, now: datetime) -> Decimal:
+        event_time = event.occurred_at or event.created_at
+        if event_time.tzinfo is None:
+            event_time = event_time.replace(tzinfo=UTC)
+        age_days = max(0.0, (now - event_time.astimezone(UTC)).total_seconds() / 86400)
+        configured = event.metadata.get("half_life_days")
+        try:
+            half_life = Decimal(configured) if configured else _DEFAULT_HALF_LIFE_DAYS
+        except (ValueError, ArithmeticError):
+            half_life = _DEFAULT_HALF_LIFE_DAYS
+        half_life = max(Decimal("1"), half_life)
+        return Decimal(str(exp(-log(2) * age_days / float(half_life))))
 
     def _clamp_100(self, value: Decimal) -> Decimal:
         return max(Decimal("-100"), min(Decimal("100"), value.quantize(Decimal("0.01"))))

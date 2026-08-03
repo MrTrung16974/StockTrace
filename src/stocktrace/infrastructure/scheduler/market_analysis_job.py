@@ -63,3 +63,12 @@ class MarketAnalysisJob:
             )
         except Exception as exc:
             self._logger.error("market_analysis_job_failed", job_name=job_name, error=str(exc))
+
+    async def run_daily_report(self) -> None:
+        """Send one fresh market-wide analysis on each trading day."""
+        if not self._settings.scheduler.market_analysis_enabled:
+            return
+        await self._run_report(
+            title="PHÂN TÍCH TỔNG QUAN THỊ TRƯỜNG HÔM NAY",
+            job_name="market_daily_overview",
+        )

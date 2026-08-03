@@ -9,6 +9,7 @@ from datetime import datetime, UTC
 from stocktrace.ai.analysis_service import AnalysisService
 from stocktrace.ai.models import MarketAnalysisContext, MarketAnalysisResult
 from stocktrace.application.services.market_data import MarketDataService, NewsArticle, StockQuote
+from stocktrace.application.services.news_quality import select_recent_unique_news
 from stocktrace.infrastructure.logging.config import get_logger
 
 INDICES = {"VNINDEX": "^VNINDEX", "VN30": "^VN30", "HNX": "^HNXINDEX", "UPCOM": None}
@@ -81,6 +82,7 @@ class MarketAnalysisService:
         sectors = sectors if isinstance(sectors, dict) else {k: None for k in SECTORS}
         international = international if isinstance(international, dict) else {k: None for k in INTERNATIONAL}
         news = news if isinstance(news, list) else []
+        news = select_recent_unique_news(news, limit=news_limit)
 
         # 2. AI Analysis
         analysis: MarketAnalysisResult | None = None
@@ -124,7 +126,7 @@ class MarketAnalysisService:
 
     async def _fetch_news(self, query: str, limit: int) -> list[NewsArticle]:
         try:
-            return await self._market_data_service.get_news(query, limit=limit)
+            return await self._market_data_service.get_market_news(query, limit=limit)
         except Exception as exc:
             self._logger.warning("market_analysis_fetch_news_failed", query=query, error=str(exc))
             return []

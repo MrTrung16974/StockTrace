@@ -107,3 +107,15 @@ async def test_news_handler_uses_cache_after_first_fetch() -> None:
     assert first[0].title == "FPT news"
     assert second[0].title == "FPT news"
     assert service.news_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_news_handler_force_refresh_bypasses_cache() -> None:
+    service = FakeMarketDataService()
+    cache = FakeCache()
+    handler = GetStockNewsQueryHandler(service, cache=cache, ttl_seconds=300)
+
+    await handler.handle(GetNewsQuery(symbol="fpt", force_refresh=True))
+    await handler.handle(GetNewsQuery(symbol="fpt", force_refresh=True))
+
+    assert service.news_calls == 2

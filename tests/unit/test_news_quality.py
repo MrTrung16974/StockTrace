@@ -35,7 +35,7 @@ def test_news_selection_excludes_old_and_duplicate_articles() -> None:
     )
 
     assert [article.url for article in selected] == [
-        "https://example.com/1",
+        "https://example.com/2",
         "https://example.com/4",
     ]
 

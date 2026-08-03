@@ -23,7 +23,7 @@ def mock_market_data_service():
         volume=1000,
         timestamp=datetime.now(UTC),
     )
-    service.get_news.return_value = [
+    service.get_market_news.return_value = [
         NewsArticle(
             ticker="MARKET",
             title="News 1",

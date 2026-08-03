@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from decimal import Decimal
 from enum import StrEnum
 
@@ -68,7 +68,7 @@ class TraceDocument:
     title: str
     url: str
     published_at: datetime | None = None
-    fetched_at: datetime = field(default_factory=datetime.now)
+    fetched_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     checksum: str | None = None
     content_type: str | None = None
     raw_text: str | None = None
@@ -97,7 +97,7 @@ class StockTraceEvent:
     reasons: tuple[TraceReason, ...] = ()
     confidence: Decimal = Decimal("1")
     occurred_at: datetime | None = None
-    created_at: datetime = field(default_factory=datetime.now)
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     metadata: dict[str, str] = field(default_factory=dict)
 
     @property
@@ -128,7 +128,7 @@ class TraceTimeline:
     symbol: str
     events: tuple[StockTraceEvent, ...]
     score: TraceScore
-    generated_at: datetime = field(default_factory=datetime.now)
+    generated_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
 
 @dataclass(frozen=True, slots=True)
@@ -141,4 +141,4 @@ class TraceExplanation:
     risks: tuple[str, ...]
     next_watch: tuple[str, ...]
     confidence: Decimal
-    generated_at: datetime = field(default_factory=datetime.now)
+    generated_at: datetime = field(default_factory=lambda: datetime.now(UTC))

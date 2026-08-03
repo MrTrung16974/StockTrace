@@ -141,27 +141,14 @@ class SchedulerService:
 
         if self._market_analysis_job is not None:
             self._scheduler.add_job(
-                self._market_analysis_job.run_morning_report,
+                self._market_analysis_job.run_daily_report,
                 CronTrigger(
-                    hour=self._settings.scheduler.market_morning_report_hour,
+                    hour=self._settings.scheduler.market_daily_report_hour,
                     minute=0,
                     day_of_week="mon-fri",
                     timezone=self._timezone,
                 ),
-                id="stocktrace-market-morning",
-                replace_existing=True,
-                max_instances=1,
-                coalesce=True,
-            )
-            self._scheduler.add_job(
-                self._market_analysis_job.run_evening_report,
-                CronTrigger(
-                    hour=self._settings.scheduler.market_evening_report_hour,
-                    minute=0,
-                    day_of_week="mon-fri",
-                    timezone=self._timezone,
-                ),
-                id="stocktrace-market-evening",
+                id="stocktrace-market-daily-overview",
                 replace_existing=True,
                 max_instances=1,
                 coalesce=True,
@@ -239,7 +226,11 @@ class SchedulerService:
             async with semaphore:
                 articles = await self._run_with_retry(
                     lambda s=symbol: self._news_handler.handle(
-                        GetNewsQuery(symbol=s, limit=self._settings.scheduler.news_digest_limit)
+                        GetNewsQuery(
+                            symbol=s,
+                            limit=self._settings.scheduler.news_digest_limit,
+                            force_refresh=True,
+                        ),
                     ),
                     symbol=symbol,
                     job_name="news_digest",

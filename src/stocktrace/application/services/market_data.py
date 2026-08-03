@@ -109,6 +109,13 @@ class MarketDataService:
         symbol = normalize_symbol(raw_symbol)
         return await self._news_provider.get_news(symbol=symbol, limit=limit)
 
+    async def get_market_news(self, query: str, limit: int = 10) -> list[NewsArticle]:
+        """Return news for a free-text market query without ticker validation."""
+        normalized = query.strip()
+        if not normalized:
+            raise ValueError("Market news query must not be empty.")
+        return await self._news_provider.get_news(symbol=normalized, limit=limit)
+
     async def get_historical_prices(self, raw_symbol: str | None, days: int = 365) -> list[HistoricalPrice]:
         """Validate a symbol and return historical prices."""
         symbol = normalize_symbol(raw_symbol)

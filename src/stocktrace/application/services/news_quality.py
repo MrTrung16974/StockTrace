@@ -27,7 +27,17 @@ def select_recent_unique_news(
     seen_titles: set[str] = set()
     selected: list[NewsArticle] = []
 
-    for article in articles:
+    def _sort_key(article: NewsArticle) -> datetime:
+        published_at = article.published_at
+        if published_at is None:
+            return datetime.min.replace(tzinfo=UTC)
+        return (
+            published_at.replace(tzinfo=UTC)
+            if published_at.tzinfo is None
+            else published_at.astimezone(UTC)
+        )
+
+    for article in sorted(articles, key=_sort_key, reverse=True):
         published_at = article.published_at
         if published_at is not None:
             published_at = (
