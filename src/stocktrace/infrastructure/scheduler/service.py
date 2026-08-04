@@ -99,9 +99,18 @@ class SchedulerService:
                 coalesce=True,
             )
             has_job = True
-        if self._price_alert_job is not None:
+        if self._settings.scheduler.price_enabled:
+            price_alert_runner = (
+                self._price_alert_job.run
+                if self._price_alert_job is not None
+                else self.send_price_alert
+            )
             self._scheduler.add_job(
-                self._price_alert_job.run,
+                # PriceAlertJob is kept as an optional compatibility adapter, but
+                # the scheduler must also work when the container does not inject it.
+                # Registering the service method directly prevents the price board
+                # from silently disappearing from the schedule.
+                price_alert_runner,
                 IntervalTrigger(
                     minutes=self._settings.scheduler.price_alert_interval_minutes,
                     timezone=self._timezone,
@@ -429,5 +438,3 @@ def _trend_icon(value: Decimal) -> str:
     if value < 0:
         return "📉"
     return "➡️"
-
-

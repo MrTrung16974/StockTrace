@@ -194,6 +194,48 @@ async def test_scheduler_registers_daily_financial_report_at_9am() -> None:
 
 
 @pytest.mark.asyncio
+async def test_scheduler_registers_price_alert_without_optional_adapter() -> None:
+    scheduler = AsyncIOScheduler(timezone=ZoneInfo("Asia/Ho_Chi_Minh"))
+    service = SchedulerService(
+        quote_handler=cast(Any, FakeQuoteHandler()),
+        news_handler=cast(Any, FakeNewsHandler()),
+        watchlist_service=cast(Any, FakeWatchlistService()),
+        bot=cast(Any, FakeBot()),
+        settings=_settings(),
+        scheduler=scheduler,
+    )
+
+    service.start()
+
+    job = scheduler.get_job("stocktrace-price-alert")
+    assert job is not None
+    assert str(job.trigger).startswith("interval[0:01:00]")
+
+    await service.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_scheduler_does_not_register_price_alert_when_disabled() -> None:
+    scheduler = AsyncIOScheduler(timezone=ZoneInfo("Asia/Ho_Chi_Minh"))
+    settings = _settings()
+    settings.scheduler.price_enabled = False
+    service = SchedulerService(
+        quote_handler=cast(Any, FakeQuoteHandler()),
+        news_handler=cast(Any, FakeNewsHandler()),
+        watchlist_service=cast(Any, FakeWatchlistService()),
+        bot=cast(Any, FakeBot()),
+        settings=settings,
+        scheduler=scheduler,
+    )
+
+    service.start()
+
+    assert scheduler.get_job("stocktrace-price-alert") is None
+
+    await service.shutdown()
+
+
+@pytest.mark.asyncio
 async def test_daily_financial_job_sends_a_dashboard_for_each_watchlist_symbol() -> None:
     bot = FakeBot()
     financial_service = FakeFinancialService()
