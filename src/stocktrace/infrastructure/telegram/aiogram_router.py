@@ -27,6 +27,7 @@ from stocktrace.application.services.news_quality import (
 )
 from stocktrace.application.services.stock_analysis_service import StockAnalysisService
 from stocktrace.application.services.trace import TraceService
+from stocktrace.application.services.trace.ingestion_service import OfficialTraceIngestionService
 from stocktrace.application.services.watchlist import (
     InvalidSymbolError,
     WatchlistService,
@@ -291,6 +292,7 @@ def create_router(  # noqa: PLR0915
     financial_analysis_service: FinancialAnalysisService | None = None,
     financial_snapshot_service: FinancialSnapshotService | None = None,
     trace_service: TraceService | None = None,
+    trace_ingestion_service: OfficialTraceIngestionService | None = None,
     quote_query_handler: GetStockQuoteQueryHandler | None = None,
     news_query_handler: GetStockNewsQueryHandler | None = None,
 ) -> Router:
@@ -733,6 +735,15 @@ def create_router(  # noqa: PLR0915
         thinking = await message.answer(f"⏳ Đang theo dõi diễn biến <b>{symbol}</b>...")
         try:
             if command_name == "why":
+                timeline = await trace_service.build_timeline(symbol, limit=10)
+                if (
+                    trace_ingestion_service is not None
+                    and not any(event.source.official for event in timeline.events)
+                ):
+                    await trace_ingestion_service.ingest_symbol(
+                        symbol,
+                        limit=settings.scheduler.trace_ingest_limit,
+                    )
                 explanation = await trace_service.explain(symbol, limit=10)
                 reasons = explanation.reasons or (
                     "Chưa có sự kiện đủ căn cứ để xác định nguyên nhân.",

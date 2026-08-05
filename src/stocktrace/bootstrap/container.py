@@ -55,6 +55,7 @@ from stocktrace.infrastructure.providers.financial.composite import CompositeFin
 from stocktrace.infrastructure.providers.financial.mock_provider import MockFinancialProvider
 from stocktrace.infrastructure.providers.financial.vnstock_provider import VNStockFinancialProvider
 from stocktrace.infrastructure.providers.official_google_news import OfficialGoogleNewsTraceProvider
+from stocktrace.infrastructure.providers.vnstock_index import VNStockIndexProvider
 from stocktrace.infrastructure.providers.yahoo import YahooFinanceQuoteProvider
 from stocktrace.infrastructure.providers.yahoo_historical import YahooHistoricalProvider
 from stocktrace.infrastructure.scheduler.financial_job import FinancialAnalysisJob
@@ -86,6 +87,7 @@ class Container:
         self._financial_snapshot_service: FinancialSnapshotService | None = None
         self._ai_financial_service: AIFinancialAnalysisService | None = None
         self._trace_service: TraceService | None = None
+        self._trace_ingestion_service: OfficialTraceIngestionService | None = None
 
     def financial_provider(self) -> CompositeFinancialProvider:
         """Build composite financial data provider."""
@@ -176,6 +178,20 @@ class Container:
                 financial_snapshot_service=self.financial_snapshot_service(),
             )
         return self._trace_service
+
+    def trace_ingestion_service(self) -> OfficialTraceIngestionService:
+        """Build shared on-demand and scheduled official trace ingestion."""
+        if self._trace_ingestion_service is None:
+            self._trace_ingestion_service = OfficialTraceIngestionService(
+                trace_service=self.trace_service(),
+                providers=[
+                    OfficialGoogleNewsTraceProvider(
+                        timeout_seconds=float(self._settings.providers.request_timeout_seconds),
+                        ca_bundle_path=self._settings.providers.ca_bundle_path,
+                    ),
+                ],
+            )
+        return self._trace_ingestion_service
 
     def market_data_service(self) -> MarketDataService:
         """Build the market data service."""
@@ -296,6 +312,7 @@ class Container:
             self._market_analysis_service = MarketAnalysisService(
                 analysis_service=self.analysis_service(),
                 market_data_service=self.market_data_service(),
+                vietnam_index_provider=VNStockIndexProvider(),
             )
         return self._market_analysis_service
 
@@ -310,15 +327,7 @@ class Container:
     def trace_ingestion_job(self) -> TraceIngestionJob:
         """Build the scheduled official-notice ingestion job."""
         return TraceIngestionJob(
-            ingestion_service=OfficialTraceIngestionService(
-                trace_service=self.trace_service(),
-                providers=[
-                    OfficialGoogleNewsTraceProvider(
-                        timeout_seconds=float(self._settings.providers.request_timeout_seconds),
-                        ca_bundle_path=self._settings.providers.ca_bundle_path,
-                    ),
-                ],
-            ),
+            ingestion_service=self.trace_ingestion_service(),
             watchlist_service=self.watchlist_service(),
             settings=self._settings,
         )

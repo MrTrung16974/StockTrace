@@ -55,11 +55,36 @@ def mock_analysis_service():
     return service
 
 
+@pytest.fixture
+def mock_vietnam_index_provider():
+    provider = AsyncMock()
+    provider.get_index_quote.return_value = StockQuote(
+        ticker="VNINDEX",
+        company_name="VNINDEX",
+        current_price=Decimal("1300"),
+        change=Decimal("5"),
+        change_percent=Decimal("0.39"),
+        open_price=Decimal("1295"),
+        high_price=Decimal("1305"),
+        low_price=Decimal("1290"),
+        volume=1000,
+        timestamp=datetime.now(UTC),
+        currency="VND",
+        source="vnstock-kbs",
+    )
+    return provider
+
+
 @pytest.mark.asyncio
-async def test_market_analysis_service_success(mock_market_data_service, mock_analysis_service):
+async def test_market_analysis_service_success(
+    mock_market_data_service,
+    mock_analysis_service,
+    mock_vietnam_index_provider,
+):
     service = MarketAnalysisService(
         analysis_service=mock_analysis_service,
         market_data_service=mock_market_data_service,
+        vietnam_index_provider=mock_vietnam_index_provider,
     )
 
     bundle = await service.analyze_market(news_limit=2)
@@ -70,10 +95,9 @@ async def test_market_analysis_service_success(mock_market_data_service, mock_an
     assert len(bundle.news) == 1
     assert bundle.analysis is not None
     assert bundle.analysis.sentiment == SentimentLabel.POSITIVE
-    provider_symbols = [
-        call.args[0] for call in mock_market_data_service.get_provider_quote.await_args_list
-    ]
-    assert "^VNINDEX" in provider_symbols
+    index_calls = mock_vietnam_index_provider.get_index_quote.await_args_list
+    index_symbols = [call.args[0] for call in index_calls]
+    assert index_symbols == ["VNINDEX", "VN30", "HNXINDEX", "UPCOMINDEX"]
     mock_market_data_service.get_quote.assert_not_awaited()
 
 
@@ -95,10 +119,11 @@ async def test_market_analysis_service_ai_disabled(mock_market_data_service, moc
 async def test_market_analysis_service_partial_data_failure(
     mock_market_data_service,
     mock_analysis_service,
+    mock_vietnam_index_provider,
 ):
     # Simulate quote failure for some indices
     async def side_effect(ticker):
-        if ticker == "^VNINDEX":
+        if ticker == "VNINDEX":
             raise RuntimeError("Fetch failed")
         return StockQuote(
             ticker=ticker,
@@ -113,11 +138,12 @@ async def test_market_analysis_service_partial_data_failure(
             timestamp=datetime.now(UTC),
         )
 
-    mock_market_data_service.get_provider_quote.side_effect = side_effect
+    mock_vietnam_index_provider.get_index_quote.side_effect = side_effect
 
     service = MarketAnalysisService(
         analysis_service=mock_analysis_service,
         market_data_service=mock_market_data_service,
+        vietnam_index_provider=mock_vietnam_index_provider,
     )
 
     bundle = await service.analyze_market()

@@ -24,6 +24,7 @@ from stocktrace.application.services.market_analysis_service import MarketAnalys
 from stocktrace.application.services.market_data import MarketDataService
 from stocktrace.application.services.stock_analysis_service import StockAnalysisService
 from stocktrace.application.services.trace import TraceService
+from stocktrace.application.services.trace.ingestion_service import OfficialTraceIngestionService
 from stocktrace.application.services.watchlist import WatchlistService
 from stocktrace.infrastructure.config import Settings
 from stocktrace.infrastructure.logging.config import get_logger
@@ -45,6 +46,7 @@ class TelegramBotRunner:
         financial_analysis_service: FinancialAnalysisService | None = None,
         financial_snapshot_service: FinancialSnapshotService | None = None,
         trace_service: TraceService | None = None,
+        trace_ingestion_service: OfficialTraceIngestionService | None = None,
         quote_query_handler: GetStockQuoteQueryHandler | None = None,
         news_query_handler: GetStockNewsQueryHandler | None = None,
         scheduler_service_factory: Callable[[Bot], SchedulerService] | None = None,
@@ -57,6 +59,7 @@ class TelegramBotRunner:
         self._financial_analysis_service = financial_analysis_service
         self._financial_snapshot_service = financial_snapshot_service
         self._trace_service = trace_service
+        self._trace_ingestion_service = trace_ingestion_service
         self._quote_query_handler = quote_query_handler
         self._news_query_handler = news_query_handler
         self._scheduler_service_factory = scheduler_service_factory
@@ -121,6 +124,7 @@ class TelegramBotRunner:
                 financial_analysis_service=self._financial_analysis_service,
                 financial_snapshot_service=self._financial_snapshot_service,
                 trace_service=self._trace_service,
+                trace_ingestion_service=self._trace_ingestion_service,
                 quote_query_handler=self._quote_query_handler,
                 news_query_handler=self._news_query_handler,
             ),

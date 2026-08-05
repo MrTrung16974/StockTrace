@@ -8,11 +8,16 @@ from datetime import UTC, datetime
 
 from stocktrace.ai.analysis_service import AnalysisService
 from stocktrace.ai.models import MarketAnalysisContext, MarketAnalysisResult
-from stocktrace.application.services.market_data import MarketDataService, NewsArticle, StockQuote
+from stocktrace.application.services.market_data import (
+    MarketDataService,
+    NewsArticle,
+    StockQuote,
+    VietnamIndexProvider,
+)
 from stocktrace.application.services.news_quality import select_recent_unique_news
 from stocktrace.infrastructure.logging.config import get_logger
 
-INDICES = {"VNINDEX": "^VNINDEX", "VN30": "^VN30", "HNX": "^HNXINDEX", "UPCOM": None}
+DOMESTIC_INDICES = ("VNINDEX", "VN30", "HNXINDEX", "UPCOMINDEX")
 SECTORS = {
     "Ngân hàng": "VCB",
     "Chứng khoán": "SSI",
@@ -53,9 +58,11 @@ class MarketAnalysisService:
         self,
         analysis_service: AnalysisService,
         market_data_service: MarketDataService,
+        vietnam_index_provider: VietnamIndexProvider | None = None,
     ) -> None:
         self._analysis_service = analysis_service
         self._market_data_service = market_data_service
+        self._vietnam_index_provider = vietnam_index_provider
         self._logger = get_logger(__name__)
 
     @property
@@ -68,7 +75,7 @@ class MarketAnalysisService:
         self._logger.info("market_analysis_started")
 
         # 1. Fetch all data concurrently
-        indices_task = self._fetch_dict(INDICES)
+        indices_task = self._fetch_domestic_indices()
         sectors_task = self._fetch_dict(SECTORS)
         international_task = self._fetch_dict(INTERNATIONAL)
         news_task = self._fetch_news(MARKET_NEWS_QUERY, limit=news_limit)
@@ -78,7 +85,7 @@ class MarketAnalysisService:
         )
 
         # Preserve a stable report shape when one of the external requests fails.
-        indices = indices if isinstance(indices, dict) else dict.fromkeys(INDICES)
+        indices = indices if isinstance(indices, dict) else dict.fromkeys(DOMESTIC_INDICES)
         sectors = sectors if isinstance(sectors, dict) else dict.fromkeys(SECTORS)
         international = (
             international
@@ -109,6 +116,24 @@ class MarketAnalysisService:
         )
         self._logger.info("market_analysis_completed", has_analysis=analysis is not None)
         return bundle
+
+    async def _fetch_domestic_indices(self) -> dict[str, StockQuote | None]:
+        """Use the Vietnam-focused provider instead of unsupported Yahoo symbols."""
+        if self._vietnam_index_provider is None:
+            return await self._fetch_dict(dict.fromkeys(DOMESTIC_INDICES))
+
+        results: dict[str, StockQuote | None] = {}
+        for symbol in DOMESTIC_INDICES:
+            try:
+                results[symbol] = await self._vietnam_index_provider.get_index_quote(symbol)
+            except Exception as exc:
+                self._logger.warning(
+                    "market_analysis_fetch_vietnam_index_failed",
+                    symbol=symbol,
+                    error=str(exc),
+                )
+                results[symbol] = None
+        return results
 
     async def _fetch_dict(self, mapping: dict[str, str | None]) -> dict[str, StockQuote | None]:
         results: dict[str, StockQuote | None] = {}

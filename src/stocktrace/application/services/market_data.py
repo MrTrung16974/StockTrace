@@ -92,6 +92,14 @@ class NewsProvider(Protocol):
         ...
 
 
+class VietnamIndexProvider(Protocol):
+    """Port for Vietnam domestic index quotes."""
+
+    async def get_index_quote(self, symbol: str) -> StockQuote:
+        """Return the latest quote for a named Vietnam market index."""
+        ...
+
+
 class MarketDataService:
     """Coordinate stock quote and news use cases."""
 

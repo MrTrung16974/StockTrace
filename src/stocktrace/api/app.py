@@ -45,6 +45,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         financial_analysis_service=container.financial_analysis_service(),
         financial_snapshot_service=container.financial_snapshot_service(),
         trace_service=container.trace_service(),
+        trace_ingestion_service=container.trace_ingestion_service(),
         quote_query_handler=container.quote_query_handler(),
         news_query_handler=container.news_query_handler(),
         scheduler_service_factory=container.scheduler_service,
