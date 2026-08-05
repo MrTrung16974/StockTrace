@@ -16,6 +16,13 @@ logger = logging.getLogger(__name__)
 _YAHOO_RSS_URL = "https://feeds.finance.yahoo.com/rss/2.0/headline?s={symbol}&region=US&lang=en-US"
 # Google News RSS as fallback for broader coverage
 _GOOGLE_NEWS_URL = "https://news.google.com/rss/search?q={symbol}+stock&hl=en-US&gl=US&ceid=US:en"
+_HTTP_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+    ),
+    "Accept": "application/rss+xml, application/xml, text/xml;q=0.9, */*;q=0.8",
+}
 
 
 class YahooNewsProvider(NewsProvider):
@@ -45,8 +52,8 @@ class YahooNewsProvider(NewsProvider):
 
     async def _parse_rss(self, url: str, symbol: str, limit: int) -> List[NewsArticle]:
         try:
-            async with httpx.AsyncClient(timeout=self._timeout) as client:
-                resp = await client.get(url, follow_redirects=True)
+            async with httpx.AsyncClient(timeout=self._timeout, headers=_HTTP_HEADERS, follow_redirects=True) as client:
+                resp = await client.get(url)
                 resp.raise_for_status()
 
             root = ElementTree.fromstring(resp.text)

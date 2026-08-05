@@ -43,6 +43,14 @@ _SOURCE_MATCHERS = {
 _HIGH_RISK = ("đình chỉ", "dinh chi", "hủy niêm yết", "huy niem yet", "xử phạt", "xu phat")
 _MEDIUM_RISK = ("cảnh báo", "canh bao", "kiểm soát", "kiem soat", "hạn chế", "han che")
 _CORPORATE_ACTION = ("cổ tức", "co tuc", "quyền", "quyen", "chốt danh sách", "dai hoi")
+_HTTP_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+    ),
+    "Accept": "application/rss+xml, application/xml, text/xml;q=0.9, */*;q=0.8",
+    "Accept-Language": "vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7",
+}
 
 
 class OfficialGoogleNewsTraceProvider:
@@ -118,6 +126,8 @@ class OfficialGoogleNewsTraceProvider:
         return httpx.AsyncClient(
             timeout=self._timeout_seconds,
             verify=self._ssl_context if self._ssl_context is not None else True,
+            headers=_HTTP_HEADERS,
+            follow_redirects=True,
         )
 
 

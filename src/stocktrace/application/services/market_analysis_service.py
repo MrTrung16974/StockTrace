@@ -74,14 +74,13 @@ class MarketAnalysisService:
         """Fetch market data and run AI analysis."""
         self._logger.info("market_analysis_started")
 
-        # 1. Fetch all data concurrently
+        # 1. Fetch indices and sectors first
         indices_task = self._fetch_domestic_indices()
         sectors_task = self._fetch_dict(SECTORS)
         international_task = self._fetch_dict(INTERNATIONAL)
-        news_task = self._fetch_news(MARKET_NEWS_QUERY, limit=news_limit)
 
-        indices, sectors, international, news = await asyncio.gather(
-            indices_task, sectors_task, international_task, news_task, return_exceptions=True
+        indices, sectors, international = await asyncio.gather(
+            indices_task, sectors_task, international_task, return_exceptions=True
         )
 
         # Preserve a stable report shape when one of the external requests fails.
@@ -92,19 +91,42 @@ class MarketAnalysisService:
             if isinstance(international, dict)
             else dict.fromkeys(INTERNATIONAL)
         )
-        news = news if isinstance(news, list) else []
-        news = select_recent_unique_news(news, limit=news_limit)
 
-        # 2. AI Analysis
-        analysis: MarketAnalysisResult | None = None
+        # 2. Ưu tiên gọi phân tích AI trước mà không bị chặn bởi việc lấy tin từ Google News
+        analysis_task = None
         if self.is_enabled:
-            context = MarketAnalysisContext(
+            initial_context = MarketAnalysisContext(
                 indices=indices,
                 sectors=sectors,
                 international=international,
-                news=tuple(news),
+                news=(),
             )
-            analysis = await self._analysis_service.analyze_market(context)
+            analysis_task = asyncio.create_task(self._analysis_service.analyze_market(initial_context))
+
+        # 3. Sau đó / đồng thời gọi Google News để lấy tin thị trường
+        try:
+            news_raw = await self._fetch_news(MARKET_NEWS_QUERY, limit=news_limit)
+            news = select_recent_unique_news(news_raw if isinstance(news_raw, list) else [], limit=news_limit)
+        except Exception as exc:
+            self._logger.warning("market_news_fetch_failed_during_ai_priority", error=str(exc))
+            news = []
+
+        analysis: MarketAnalysisResult | None = await analysis_task if analysis_task else None
+
+        # Nếu có tin thị trường từ Google News, cập nhật bổ sung vào bài phân tích AI
+        if news and self.is_enabled:
+            try:
+                updated_context = MarketAnalysisContext(
+                    indices=indices,
+                    sectors=sectors,
+                    international=international,
+                    news=tuple(news),
+                )
+                updated_analysis = await self._analysis_service.analyze_market(updated_context)
+                if updated_analysis is not None:
+                    analysis = updated_analysis
+            except Exception:
+                pass
 
         bundle = MarketAnalysisBundle(
             timestamp=datetime.now(UTC),

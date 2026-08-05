@@ -443,7 +443,6 @@ def create_router(  # noqa: PLR0915
                 articles = [
                     article for article in articles if is_recognized_financial_source(article)
                 ]
-                analysis = None
         except InvalidSymbolError as exc:
             await message.answer(str(exc))
             return

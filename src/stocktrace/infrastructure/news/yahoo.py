@@ -93,6 +93,14 @@ VN_COMPANY_ALIASES = {
     "VCB": ("vietcombank", "ngoai thuong", "ngoại thương"),
     "TCB": ("techcombank", "ky thuong", "kỹ thương"),
 }
+_HTTP_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+    ),
+    "Accept": "application/rss+xml, application/xml, text/xml;q=0.9, */*;q=0.8",
+    "Accept-Language": "vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7",
+}
 
 
 class YahooFinanceNewsProvider:
@@ -128,7 +136,9 @@ class YahooFinanceNewsProvider:
         limit: int,
     ) -> list[NewsArticle]:
         try:
-            async with httpx.AsyncClient(timeout=self._timeout_seconds) as client:
+            async with httpx.AsyncClient(
+                timeout=self._timeout_seconds, headers=_HTTP_HEADERS, follow_redirects=True
+            ) as client:
                 response = await client.get(
                     self._feed_url,
                     params={"s": symbol, "region": "US", "lang": "en-US"},
@@ -147,7 +157,9 @@ class YahooFinanceNewsProvider:
 
     async def _fetch_google_news(self, symbol: str, limit: int) -> list[NewsArticle]:
         try:
-            async with httpx.AsyncClient(timeout=self._timeout_seconds) as client:
+            async with httpx.AsyncClient(
+                timeout=self._timeout_seconds, headers=_HTTP_HEADERS, follow_redirects=True
+            ) as client:
                 response = await client.get(
                     self._google_feed_url,
                     params={
@@ -263,18 +275,11 @@ def _google_news_query(symbol: str) -> str:
     normalized = symbol.strip().upper()
     aliases = VN_COMPANY_ALIASES.get(normalized, ())
     symbol_terms = " OR ".join(
-        [f'"cổ phiếu {normalized}"', f'"{normalized} stock"', f'"HOSE:{normalized}"'],
+        [f'"{normalized}"', f'"cổ phiếu {normalized}"', f'"{normalized} stock"', f'"HOSE:{normalized}"'],
     )
     alias_terms = " OR ".join(f'"{alias}"' for alias in aliases)
     company_part = f" OR {alias_terms}" if alias_terms else ""
-    policy_sources = " OR ".join(f"site:{domain}" for domain in OFFICIAL_POLICY_SOURCE_DOMAINS)
-    return (
-        f"({symbol_terms}{company_part}) "
-        "(cổ phiếu OR chứng khoán OR HOSE OR VN-Index) "
-        "((CafeF OR Vietstock OR VnEconomy OR VietnamBiz OR "
-        '"Người Quan Sát" OR "Tin nhanh chứng khoán" OR "Báo Đầu Tư") '
-        f"OR {policy_sources}) when:{MAX_NEWS_AGE_DAYS}d"
-    )
+    return f"({symbol_terms}{company_part}) when:{MAX_NEWS_AGE_DAYS}d"
 
 
 def _is_relevant_vietnam_market_article(

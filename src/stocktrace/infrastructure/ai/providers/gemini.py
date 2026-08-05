@@ -25,14 +25,14 @@ class GeminiProvider:
     def __init__(self, settings: AISettings) -> None:
         self._settings = settings
         api_key = settings.api_key
-        if api_key is None:
-            msg = "STOCKTRACE_AI__API_KEY must be set when using the Gemini provider."
-            raise RuntimeError(msg)
-        self._client = genai.Client(api_key=api_key.get_secret_value())
+        self._client = genai.Client(api_key=api_key.get_secret_value()) if api_key is not None else None
         self._model = settings.model
 
     async def complete(self, request: LLMRequest) -> LLMResponse:
         """Generate a completion using the Gemini API."""
+        if self._client is None:
+            msg = "STOCKTRACE_AI__API_KEY must be set when using the Gemini provider."
+            raise RuntimeError(msg)
         config = types.GenerateContentConfig(
             temperature=request.temperature,
             max_output_tokens=request.max_tokens,
