@@ -63,16 +63,18 @@ class CacheSettings(BaseModel):
 
 
 class AISettings(BaseModel):
-    """AI analysis and translation settings."""
+    """AI analysis and translation settings — Google Gemini provider."""
 
     enabled: bool = False
-    provider: str = "openai"
+    # Always "gemini" — kept as a field for forward compatibility
+    provider: str = "gemini"
     api_key: SecretStr | None = None
-    model: str = "gpt-4o-mini"
-    base_url: str | None = None
-    max_tokens: int = Field(default=1024, ge=256, le=4096)
-    temperature: float = Field(default=0.3, ge=0, le=1)
-    request_timeout_seconds: float = Field(default=30.0, gt=0)
+    # Default model: gemini-2.0-flash (fast, cost-efficient, supports long context)
+    # Alternatives: gemini-2.0-flash-thinking-exp, gemini-1.5-pro, gemini-1.5-flash
+    model: str = "gemini-2.0-flash"
+    max_tokens: int = Field(default=2048, ge=256, le=8192)
+    temperature: float = Field(default=0.3, ge=0, le=2)
+    request_timeout_seconds: float = Field(default=60.0, gt=0)
     cache_ttl_seconds: int = Field(default=1800, ge=60)
     market_cache_ttl_seconds: int = Field(default=1800, ge=60)
     report_cache_ttl_seconds: int = Field(default=300, ge=60)
@@ -80,20 +82,8 @@ class AISettings(BaseModel):
 
     @property
     def has_api_key(self) -> bool:
-        """Return whether an API key is configured."""
+        """Return whether a Gemini API key is configured."""
         return self.api_key is not None and self.api_key.get_secret_value().strip() != ""
-
-    @property
-    def resolved_base_url(self) -> str:
-        """Return the configured or provider-default API base URL."""
-        if self.base_url:
-            return self.base_url.rstrip("/")
-        defaults = {
-            "openai": "https://api.openai.com/v1",
-            "deepseek": "https://api.deepseek.com/v1",
-            "openrouter": "https://openrouter.ai/api/v1",
-        }
-        return defaults.get(self.provider.lower(), "https://api.openai.com/v1")
 
 
 class TelegramSettings(BaseModel):

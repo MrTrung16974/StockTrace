@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from stocktrace.api.middleware.request_timing import RequestTimingMiddleware
 from stocktrace.api.middleware.security import ApiSecurityMiddleware
-from stocktrace.api.routers import financial, health, stocks, system, trace
+from stocktrace.api.routers import financial, health, market, stocks, system, trace
 from stocktrace.bootstrap.container import Container
 from stocktrace.infrastructure.config import Settings, get_settings
 from stocktrace.infrastructure.logging.config import configure_logging, get_logger
@@ -89,6 +89,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(health.router)
     app.include_router(system.router)
     app.include_router(stocks.router)
+    app.include_router(market.router)
     app.include_router(financial.router)
     app.include_router(trace.router)
 
