@@ -1,5 +1,13 @@
 #!/bin/bash
 
+# Cập nhật file requirements.txt từ uv / pyproject.toml để đảm bảo Docker luôn nhận dependency mới nhất
+if command -v uv &> /dev/null; then
+    echo "Đang đồng bộ và cập nhật file requirements.txt từ uv..."
+    uv export --no-hashes --no-dev --no-emit-project -o requirements.txt
+else
+    echo "Lưu ý: Không tìm thấy lệnh 'uv', tiếp tục sử dụng file requirements.txt hiện tại..."
+fi
+
 # Dừng các container hiện tại (nếu có)
 docker compose down
 
