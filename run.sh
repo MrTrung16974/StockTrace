@@ -1,4 +1,5 @@
 #!/bin/bash
+set -e
 
 # Cập nhật file requirements.txt từ uv / pyproject.toml để đảm bảo Docker luôn nhận dependency mới nhất
 if command -v uv &> /dev/null; then
