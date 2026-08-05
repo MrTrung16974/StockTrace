@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from contextlib import AbstractAsyncContextManager
+
 from stocktrace.application.services.financial.financial_analysis_service import (
     FinancialAnalysisService,
 )
 from stocktrace.application.services.watchlist import WatchlistService
+from stocktrace.domain.entities.financial import FinancialDashboard
+from stocktrace.domain.repositories.financial import FinancialDashboardSnapshotRepository
 from stocktrace.domain.value_objects.financial_period import FinancialPeriod
 from stocktrace.infrastructure.config import Settings
 from stocktrace.infrastructure.logging.config import get_logger
@@ -24,11 +29,16 @@ class FinancialAnalysisJob:
         watchlist_service: WatchlistService,
         bot: TelegramMessageBot,
         settings: Settings,
+        snapshot_repository_context_factory: Callable[
+            [], AbstractAsyncContextManager[FinancialDashboardSnapshotRepository]
+        ]
+        | None = None,
     ) -> None:
         self._financial = financial_service
         self._watchlist = watchlist_service
         self._bot = bot
         self._settings = settings
+        self._snapshot_repository_context_factory = snapshot_repository_context_factory
         self._logger = get_logger(__name__)
 
     async def sync_financial_statements(self) -> None:
@@ -42,7 +52,8 @@ class FinancialAnalysisJob:
 
         for item in items:
             try:
-                await self._financial.analyze(item.symbol, period)
+                dashboard = await self._financial.analyze(item.symbol, period)
+                await self._save_snapshot(dashboard)
                 self._logger.info("financial_sync_completed", symbol=item.symbol)
             except Exception as exc:
                 self._logger.warning(
@@ -67,6 +78,7 @@ class FinancialAnalysisJob:
         for item in items:
             try:
                 dashboard = await self._financial.analyze(item.symbol, period)
+                await self._save_snapshot(dashboard)
                 message = await self._bot.send_message(
                     chat_id=chat_id,
                     text=f"📊 Phân tích tài chính 09:00: <b>{item.symbol}</b>",
@@ -94,6 +106,7 @@ class FinancialAnalysisJob:
         for item in items:
             try:
                 dashboard = await self._financial.analyze(item.symbol, period)
+                await self._save_snapshot(dashboard)
                 message = await self._bot.send_message(
                     chat_id=chat_id,
                     text=f"📊 Quarterly Financial Report: <b>{item.symbol}</b>",
@@ -105,3 +118,10 @@ class FinancialAnalysisJob:
                     symbol=item.symbol,
                     error=str(exc),
                 )
+
+    async def _save_snapshot(self, dashboard: FinancialDashboard) -> None:
+        """Persist a successful analysis so transient provider outages are recoverable."""
+        if self._snapshot_repository_context_factory is None:
+            return
+        async with self._snapshot_repository_context_factory() as repository:
+            await repository.save_dashboard(dashboard)

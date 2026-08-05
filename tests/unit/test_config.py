@@ -31,6 +31,30 @@ def test_nested_settings_can_be_overridden(monkeypatch: pytest.MonkeyPatch) -> N
     assert settings.api.port == expected_port
 
 
+def test_provider_ca_bundle_can_be_set_from_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("STOCKTRACE_PROVIDERS__CA_BUNDLE_PATH", "/etc/ssl/company-proxy.pem")
+
+    settings = Settings(_env_file=None)
+
+    assert settings.providers.ca_bundle_path == "/etc/ssl/company-proxy.pem"
+
+
+def test_scheduler_symbol_lists_accept_comma_separated_environment_values(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("STOCKTRACE_SCHEDULER__WATCHLIST_SYMBOLS", "HPG,FPT,VCB")
+    monkeypatch.setenv("STOCKTRACE_SCHEDULER__DISABLED_SYMBOLS", "VCB")
+    monkeypatch.setenv("STOCKTRACE_SCHEDULER__ANALYSIS_SYMBOLS", "HPG,FPT")
+
+    settings = Settings(_env_file=None)
+
+    assert settings.scheduler.watchlist_symbols == ["HPG", "FPT", "VCB"]
+    assert settings.scheduler.disabled_symbols == ["VCB"]
+    assert settings.scheduler.analysis_symbols == ["HPG", "FPT"]
+
+
 def test_prod_settings_load_with_required_secrets() -> None:
     settings = Settings(
         _env_file=None,

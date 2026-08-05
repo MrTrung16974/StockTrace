@@ -26,11 +26,12 @@ from stocktrace.application.services.financial.ai_financial_analysis_service imp
 from stocktrace.application.services.financial.financial_analysis_service import (
     FinancialAnalysisService,
 )
+from stocktrace.application.services.financial.snapshot_service import FinancialSnapshotService
 from stocktrace.application.services.health import HealthCheckService
 from stocktrace.application.services.market_analysis_service import MarketAnalysisService
 from stocktrace.application.services.market_data import MarketDataService
 from stocktrace.application.services.stock_analysis_service import StockAnalysisService
-from stocktrace.application.services.trace import TraceService
+from stocktrace.application.services.trace import OfficialTraceIngestionService, TraceService
 from stocktrace.application.services.trace.trace_service import TraceRepository
 from stocktrace.application.services.watchlist import WatchlistService
 from stocktrace.domain.ports.ai_cache import AICache
@@ -44,6 +45,7 @@ from stocktrace.infrastructure.cache.redis_ai_cache import RedisAICache
 from stocktrace.infrastructure.config import Settings, get_settings
 from stocktrace.infrastructure.config.settings import Environment
 from stocktrace.infrastructure.db.repositories import (
+    SqlAlchemyFinancialDashboardSnapshotRepository,
     SqlAlchemyTraceRepository,
     SqlAlchemyWatchlistRepository,
 )
@@ -52,6 +54,7 @@ from stocktrace.infrastructure.news.yahoo import YahooFinanceNewsProvider
 from stocktrace.infrastructure.providers.financial.composite import CompositeFinancialProvider
 from stocktrace.infrastructure.providers.financial.mock_provider import MockFinancialProvider
 from stocktrace.infrastructure.providers.financial.vnstock_provider import VNStockFinancialProvider
+from stocktrace.infrastructure.providers.official_google_news import OfficialGoogleNewsTraceProvider
 from stocktrace.infrastructure.providers.yahoo import YahooFinanceQuoteProvider
 from stocktrace.infrastructure.providers.yahoo_historical import YahooHistoricalProvider
 from stocktrace.infrastructure.scheduler.financial_job import FinancialAnalysisJob
@@ -59,6 +62,7 @@ from stocktrace.infrastructure.scheduler.market_analysis_job import MarketAnalys
 from stocktrace.infrastructure.scheduler.protocols import TelegramMessageBot
 from stocktrace.infrastructure.scheduler.service import SchedulerService
 from stocktrace.infrastructure.scheduler.stock_analysis_job import StockAnalysisJob
+from stocktrace.infrastructure.scheduler.trace_ingestion_job import TraceIngestionJob
 
 
 class Container:
@@ -79,6 +83,7 @@ class Container:
         self._historical_provider: YahooHistoricalProvider | None = None
         self._financial_provider: CompositeFinancialProvider | None = None
         self._financial_analysis_service: FinancialAnalysisService | None = None
+        self._financial_snapshot_service: FinancialSnapshotService | None = None
         self._ai_financial_service: AIFinancialAnalysisService | None = None
         self._trace_service: TraceService | None = None
 
@@ -112,6 +117,14 @@ class Container:
             )
         return self._financial_analysis_service
 
+    def financial_snapshot_service(self) -> FinancialSnapshotService:
+        """Build the last-known-good financial dashboard lookup service."""
+        if self._financial_snapshot_service is None:
+            self._financial_snapshot_service = FinancialSnapshotService(
+                repository_context_factory=self._financial_snapshot_repository,
+            )
+        return self._financial_snapshot_service
+
     def financial_analysis_handler(self) -> GetFinancialAnalysisQueryHandler:
         """Build financial analysis query handler."""
         return GetFinancialAnalysisQueryHandler(self.financial_analysis_service())
@@ -139,6 +152,7 @@ class Container:
             watchlist_service=self.watchlist_service(),
             bot=bot,
             settings=self._settings,
+            snapshot_repository_context_factory=self._financial_snapshot_repository,
         )
 
     def health_service(self) -> HealthCheckService:
@@ -159,6 +173,7 @@ class Container:
             self._trace_service = TraceService(
                 repository_context_factory=self._trace_repository,
                 financial_analysis_service=self.financial_analysis_service(),
+                financial_snapshot_service=self.financial_snapshot_service(),
             )
         return self._trace_service
 
@@ -292,6 +307,22 @@ class Container:
             settings=self._settings,
         )
 
+    def trace_ingestion_job(self) -> TraceIngestionJob:
+        """Build the scheduled official-notice ingestion job."""
+        return TraceIngestionJob(
+            ingestion_service=OfficialTraceIngestionService(
+                trace_service=self.trace_service(),
+                providers=[
+                    OfficialGoogleNewsTraceProvider(
+                        timeout_seconds=float(self._settings.providers.request_timeout_seconds),
+                        ca_bundle_path=self._settings.providers.ca_bundle_path,
+                    ),
+                ],
+            ),
+            watchlist_service=self.watchlist_service(),
+            settings=self._settings,
+        )
+
     def scheduler_service(self, bot: TelegramMessageBot) -> SchedulerService:
         """Build the scheduled Telegram job service."""
         return SchedulerService(
@@ -303,6 +334,7 @@ class Container:
             stock_analysis_job=self.stock_analysis_job(bot),
             market_analysis_job=self.market_analysis_job(bot),
             financial_analysis_job=self.financial_analysis_job(bot),
+            trace_ingestion_job=self.trace_ingestion_job(),
         )
 
     async def dispose(self) -> None:
@@ -322,6 +354,13 @@ class Container:
     async def _trace_repository(self) -> AsyncIterator[TraceRepository]:
         async with self._session_manager.session() as session:
             yield SqlAlchemyTraceRepository(session=session)
+
+    @asynccontextmanager
+    async def _financial_snapshot_repository(
+        self,
+    ) -> AsyncIterator[SqlAlchemyFinancialDashboardSnapshotRepository]:
+        async with self._session_manager.session() as session:
+            yield SqlAlchemyFinancialDashboardSnapshotRepository(session=session)
 
 
 @lru_cache(maxsize=1)

@@ -12,29 +12,29 @@ TELEGRAM_MAX_MESSAGE_LENGTH = 4096
 
 
 def split_telegram_message(text: str, limit: int = TELEGRAM_MAX_MESSAGE_LENGTH) -> list[str]:
-    """Split a long message into Telegram-safe chunks."""
+    """Split a message into Telegram-safe chunks without losing any content."""
     if len(text) <= limit:
         return [text]
 
     parts: list[str] = []
-    current: list[str] = []
-    current_len = 0
+    remaining = text
+    while len(remaining) > limit:
+        # Prefer a line boundary, then a word boundary.  Fall back to a hard
+        # split so an unusually long AI-generated line cannot exceed Telegram's
+        # message limit indefinitely.
+        boundary = remaining.rfind("\n", 0, limit + 1)
+        if boundary <= 0:
+            boundary = remaining.rfind(" ", 0, limit + 1)
+        if boundary <= 0:
+            boundary = limit
+        elif remaining[boundary] == "\n":
+            boundary += 1
 
-    for line in text.split("\n"):
-        extra = len(line) + (1 if current else 0)
-        if current and current_len + extra > limit:
-            parts.append("\n".join(current))
-            current = [line]
-            current_len = len(line)
-            continue
-        if current:
-            current_len += extra
-        else:
-            current_len = len(line)
-        current.append(line)
+        parts.append(remaining[:boundary])
+        remaining = remaining[boundary:]
 
-    if current:
-        parts.append("\n".join(current))
+    if remaining:
+        parts.append(remaining)
     return parts
 
 

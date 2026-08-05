@@ -7,6 +7,9 @@ from stocktrace.infrastructure.telegram.delivery import (
     strip_html_tags,
 )
 
+TEST_MESSAGE_LIMIT = 1200
+EXPECTED_LONG_LINE_PARTS = 3
+
 
 def test_split_telegram_message_keeps_short_text() -> None:
     text = "short message"
@@ -16,11 +19,21 @@ def test_split_telegram_message_keeps_short_text() -> None:
 def test_split_telegram_message_splits_on_line_boundaries() -> None:
     lines = [f"line-{index}" for index in range(500)]
     text = "\n".join(lines)
-    parts = split_telegram_message(text, limit=1200)
+    parts = split_telegram_message(text, limit=TEST_MESSAGE_LIMIT)
     assert len(parts) > 1
-    assert "\n".join(parts) == text
+    assert "".join(parts) == text
     for part in parts:
-        assert len(part) <= 1200
+        assert len(part) <= TEST_MESSAGE_LIMIT
+
+
+def test_split_telegram_message_splits_one_oversized_line() -> None:
+    text = "x" * 2500
+
+    parts = split_telegram_message(text, limit=TEST_MESSAGE_LIMIT)
+
+    assert len(parts) == EXPECTED_LONG_LINE_PARTS
+    assert "".join(parts) == text
+    assert all(len(part) <= TEST_MESSAGE_LIMIT for part in parts)
 
 
 def test_strip_html_tags_removes_markup() -> None:

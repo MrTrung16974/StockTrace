@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from decimal import Decimal
 from datetime import UTC, datetime
+from decimal import Decimal
 
 import pytest
 
@@ -61,3 +61,15 @@ async def test_market_data_service_normalizes_symbol() -> None:
 
     assert quote.ticker == "FPT"
     assert articles[0].title == "FPT news"
+
+
+@pytest.mark.asyncio
+async def test_market_data_service_accepts_trusted_provider_symbol() -> None:
+    service = MarketDataService(
+        quote_provider=FakeQuoteProvider(),
+        news_provider=FakeNewsProvider(),
+    )
+
+    quote = await service.get_provider_quote("^VNINDEX")
+
+    assert quote.ticker == "^VNINDEX"

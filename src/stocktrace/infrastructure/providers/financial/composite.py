@@ -9,7 +9,11 @@ from stocktrace.domain.entities.financial import (
     FinancialRatio,
     IncomeStatement,
 )
-from stocktrace.domain.ports.financial_provider import FinancialDataNotFoundError, FinancialProviderError
+from stocktrace.domain.ports.financial_provider import (
+    FinancialDataNotFoundError,
+    FinancialProviderError,
+    FinancialProviderUnavailableError,
+)
 from stocktrace.domain.value_objects.financial_period import FinancialPeriod
 from stocktrace.infrastructure.logging.config import get_logger
 
@@ -65,22 +69,37 @@ class CompositeFinancialProvider:
 
     async def _call(self, method: str, symbol: str, period: FinancialPeriod | None = None):
         """Call method on providers with fallback."""
-        last_error: Exception | None = None
+        unavailable_error: FinancialProviderError | None = None
+        not_found_error: FinancialDataNotFoundError | None = None
         for provider in self._providers:
             try:
                 fn = getattr(provider, method)
                 if period is not None:
                     return await fn(symbol, period)
                 return await fn(symbol)
-            except (FinancialProviderError, FinancialDataNotFoundError) as exc:
+            except FinancialDataNotFoundError as exc:
                 logger.warning(
-                    "financial_provider_failed",
+                    "financial_provider_data_not_found",
                     provider=provider.provider_name,
                     method=method,
                     symbol=symbol,
                     error=str(exc),
                 )
-                last_error = exc
+                not_found_error = exc
                 continue
+            except FinancialProviderError as exc:
+                logger.warning(
+                    "financial_provider_unavailable",
+                    provider=provider.provider_name,
+                    method=method,
+                    symbol=symbol,
+                    error=str(exc),
+                )
+                unavailable_error = exc
+                continue
+
+        if unavailable_error is not None:
+            msg = f"Financial providers are unavailable for {symbol}"
+            raise FinancialProviderUnavailableError(msg) from unavailable_error
         msg = f"All financial providers failed for {symbol}"
-        raise FinancialDataNotFoundError(msg) from last_error
+        raise FinancialDataNotFoundError(msg) from not_found_error

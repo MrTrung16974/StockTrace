@@ -104,6 +104,18 @@ class MarketDataService:
         symbol = normalize_symbol(raw_symbol)
         return await self._quote_provider.get_quote(symbol)
 
+    async def get_provider_quote(self, provider_symbol: str) -> StockQuote:
+        """Return a quote for a trusted provider-specific symbol.
+
+        This path is reserved for internal market benchmarks such as Yahoo
+        indices (``^GSPC``). User-entered ticker commands must use
+        :meth:`get_quote`, which retains stock-symbol validation.
+        """
+        symbol = provider_symbol.strip()
+        if not symbol:
+            raise MarketDataError("Provider symbol must not be empty.")
+        return await self._quote_provider.get_quote(symbol)
+
     async def get_news(self, raw_symbol: str | None, limit: int = 5) -> list[NewsArticle]:
         """Validate a symbol and return latest related news."""
         symbol = normalize_symbol(raw_symbol)
@@ -116,7 +128,11 @@ class MarketDataService:
             raise ValueError("Market news query must not be empty.")
         return await self._news_provider.get_news(symbol=normalized, limit=limit)
 
-    async def get_historical_prices(self, raw_symbol: str | None, days: int = 365) -> list[HistoricalPrice]:
+    async def get_historical_prices(
+        self,
+        raw_symbol: str | None,
+        days: int = 365,
+    ) -> list[HistoricalPrice]:
         """Validate a symbol and return historical prices."""
         symbol = normalize_symbol(raw_symbol)
         return await self._quote_provider.get_historical_prices(symbol, days)

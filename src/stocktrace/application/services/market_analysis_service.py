@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 
 from stocktrace.ai.analysis_service import AnalysisService
 from stocktrace.ai.models import MarketAnalysisContext, MarketAnalysisResult
@@ -66,7 +66,7 @@ class MarketAnalysisService:
     async def analyze_market(self, news_limit: int = 10) -> MarketAnalysisBundle:
         """Fetch market data and run AI analysis."""
         self._logger.info("market_analysis_started")
-        
+
         # 1. Fetch all data concurrently
         indices_task = self._fetch_dict(INDICES)
         sectors_task = self._fetch_dict(SECTORS)
@@ -77,10 +77,14 @@ class MarketAnalysisService:
             indices_task, sectors_task, international_task, news_task, return_exceptions=True
         )
 
-        # Handle potential exceptions from gather
-        indices = indices if isinstance(indices, dict) else {k: None for k in INDICES}
-        sectors = sectors if isinstance(sectors, dict) else {k: None for k in SECTORS}
-        international = international if isinstance(international, dict) else {k: None for k in INTERNATIONAL}
+        # Preserve a stable report shape when one of the external requests fails.
+        indices = indices if isinstance(indices, dict) else dict.fromkeys(INDICES)
+        sectors = sectors if isinstance(sectors, dict) else dict.fromkeys(SECTORS)
+        international = (
+            international
+            if isinstance(international, dict)
+            else dict.fromkeys(INTERNATIONAL)
+        )
         news = news if isinstance(news, list) else []
         news = select_recent_unique_news(news, limit=news_limit)
 
@@ -114,14 +118,16 @@ class MarketAnalysisService:
                 results[name] = None
                 continue
             try:
-                # Need to use the raw provider directly or quote handler to skip symbol validation if it's strict
-                # Wait, MarketDataService uses get_quote which normalizes symbols
-                quote = await self._market_data_service.get_quote(ticker)
+                quote = await self._market_data_service.get_provider_quote(ticker)
                 results[name] = quote
             except Exception as exc:
-                self._logger.warning("market_analysis_fetch_quote_failed", ticker=ticker, error=str(exc))
+                self._logger.warning(
+                    "market_analysis_fetch_quote_failed",
+                    ticker=ticker,
+                    error=str(exc),
+                )
                 results[name] = None
-            await asyncio.sleep(0.1) # small delay
+            await asyncio.sleep(0.1)
         return results
 
     async def _fetch_news(self, query: str, limit: int) -> list[NewsArticle]:

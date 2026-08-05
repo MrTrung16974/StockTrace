@@ -10,12 +10,21 @@ from aiogram.filters import Command, CommandObject
 from aiogram.types import Message
 
 from stocktrace.ai.models import AnalysisMode
+from stocktrace.application.queries.stock_handlers import (
+    GetStockNewsQueryHandler,
+    GetStockQuoteQueryHandler,
+)
+from stocktrace.application.queries.stock_queries import GetNewsQuery, GetPriceQuery
 from stocktrace.application.services.financial.financial_analysis_service import (
     FinancialAnalysisService,
 )
+from stocktrace.application.services.financial.snapshot_service import FinancialSnapshotService
 from stocktrace.application.services.market_analysis_service import MarketAnalysisService
 from stocktrace.application.services.market_data import MarketDataError, MarketDataService
-from stocktrace.application.services.news_quality import select_recent_unique_news
+from stocktrace.application.services.news_quality import (
+    is_recognized_financial_source,
+    select_recent_unique_news,
+)
 from stocktrace.application.services.stock_analysis_service import StockAnalysisService
 from stocktrace.application.services.trace import TraceService
 from stocktrace.application.services.watchlist import (
@@ -24,7 +33,11 @@ from stocktrace.application.services.watchlist import (
     normalize_symbol,
 )
 from stocktrace.domain.entities.financial import FinancialDashboard, FinancialRatio
-from stocktrace.domain.ports.financial_provider import FinancialDataNotFoundError
+from stocktrace.domain.entities.trace import TraceSeverity, TraceTimeline
+from stocktrace.domain.ports.financial_provider import (
+    FinancialDataNotFoundError,
+    FinancialProviderUnavailableError,
+)
 from stocktrace.domain.value_objects.financial_period import FinancialPeriod
 from stocktrace.infrastructure.config import Settings
 from stocktrace.infrastructure.logging.config import get_logger
@@ -82,6 +95,14 @@ def _financial_usage(command_name: str) -> str:
     return usages.get(command_name, usages["financial"])
 
 
+def _watchlist_owner_id(message: Message) -> str | None:
+    """Use a chat-scoped watchlist so scheduled jobs read the same symbols."""
+    chat = getattr(message, "chat", None)
+    if chat is None:
+        return None
+    return str(chat.id)
+
+
 def _format_decimal(value: Decimal | None, suffix: str = "", digits: int = 2) -> str:
     """Format a Decimal value for Telegram output."""
     if value is None:
@@ -116,6 +137,60 @@ def _latest_ratio(dashboard: FinancialDashboard) -> FinancialRatio | None:
     """Return the latest ratio snapshot from a dashboard."""
     ratios = dashboard.analysis.ratios
     return ratios[-1] if ratios else None
+
+
+def _build_trace_command_response(timeline: TraceTimeline, command_name: str) -> str:
+    """Format a timeline response according to the requested trace command."""
+    score = timeline.score
+    if command_name == "risks":
+        events = [
+            event
+            for event in timeline.events
+            if event.severity in (TraceSeverity.MEDIUM, TraceSeverity.HIGH, TraceSeverity.CRITICAL)
+        ]
+        lines = [f"<b>Rủi ro cần theo dõi — {timeline.symbol}</b>"]
+        if not events:
+            lines.append("Chưa ghi nhận sự kiện rủi ro mức trung bình trở lên.")
+        else:
+            lines.extend(
+                f"- [{event.severity.value}] {event.title} ({event.source.code})"
+                for event in events[:5]
+            )
+        return "\n".join(lines)
+
+    if command_name == "signals":
+        lines = [
+            f"<b>Tín hiệu theo dõi — {timeline.symbol}</b>",
+            f"Điểm tín hiệu: {score.signal_score}/100",
+            f"Độ tin cậy: {score.conviction_score}/100",
+        ]
+        if not timeline.events:
+            lines.append("Chưa có tín hiệu đã ingest cho mã này.")
+        else:
+            lines.append("")
+            lines.append("<b>Tín hiệu mới nhất</b>")
+            lines.extend(
+                f"- [{event.severity.value}] {event.title} ({event.source.code})"
+                for event in timeline.events[:5]
+            )
+        return "\n".join(lines)
+
+    lines = [
+        f"<b>Theo dõi diễn biến {timeline.symbol}</b>",
+        f"Tín hiệu: {score.signal_score}/100",
+        f"Rủi ro: {score.risk_score}/100",
+        f"Độ tin cậy: {score.conviction_score}/100",
+        f"Sự kiện: {score.event_count}",
+    ]
+    if not timeline.events:
+        lines.extend(["", "Chưa có sự kiện theo dõi chính thống cho mã này."])
+    else:
+        lines.extend(["", "<b>Sự kiện mới nhất</b>"])
+        lines.extend(
+            f"- [{event.severity.value}] {event.title} ({event.source.code})"
+            for event in timeline.events[:5]
+        )
+    return "\n".join(lines)
 
 
 def _build_financial_command_response(
@@ -214,7 +289,10 @@ def create_router(  # noqa: PLR0915
     stock_analysis_service: StockAnalysisService | None = None,
     market_analysis_service: MarketAnalysisService | None = None,
     financial_analysis_service: FinancialAnalysisService | None = None,
+    financial_snapshot_service: FinancialSnapshotService | None = None,
     trace_service: TraceService | None = None,
+    quote_query_handler: GetStockQuoteQueryHandler | None = None,
+    news_query_handler: GetStockNewsQueryHandler | None = None,
 ) -> Router:
     """Create the Telegram command router."""
     router = Router(name="stocktrace-telegram")
@@ -246,13 +324,14 @@ def create_router(  # noqa: PLR0915
         if not is_authorized_user(message.from_user, settings.telegram):
             await reject_unauthorized(message)
             return
-        if message.from_user is None:
+        owner_id = _watchlist_owner_id(message)
+        if owner_id is None:
             await reject_unauthorized(message)
             return
 
         try:
             item = await watchlist_service.add_symbol(
-                owner_id=str(message.from_user.id),
+                owner_id=owner_id,
                 raw_symbol=command.args,
             )
         except InvalidSymbolError as exc:
@@ -266,13 +345,14 @@ def create_router(  # noqa: PLR0915
         if not is_authorized_user(message.from_user, settings.telegram):
             await reject_unauthorized(message)
             return
-        if message.from_user is None:
+        owner_id = _watchlist_owner_id(message)
+        if owner_id is None:
             await reject_unauthorized(message)
             return
 
         try:
             removed = await watchlist_service.remove_symbol(
-                owner_id=str(message.from_user.id),
+                owner_id=owner_id,
                 raw_symbol=command.args,
             )
         except InvalidSymbolError as exc:
@@ -287,11 +367,12 @@ def create_router(  # noqa: PLR0915
         if not is_authorized_user(message.from_user, settings.telegram):
             await reject_unauthorized(message)
             return
-        if message.from_user is None:
+        owner_id = _watchlist_owner_id(message)
+        if owner_id is None:
             await reject_unauthorized(message)
             return
 
-        items = await watchlist_service.list_symbols(owner_id=str(message.from_user.id))
+        items = await watchlist_service.list_symbols(owner_id=owner_id)
         await message.answer(build_watchlist_message(items))
 
     @router.message(Command("price"))
@@ -301,12 +382,25 @@ def create_router(  # noqa: PLR0915
             return
 
         try:
-            quote = await market_data_service.get_quote(command.args)
+            if quote_query_handler is not None:
+                quote = await quote_query_handler.handle(
+                    GetPriceQuery(symbol=command.args or ""),
+                )
+            else:
+                quote = await market_data_service.get_quote(command.args)
         except InvalidSymbolError as exc:
             await message.answer(str(exc))
             return
         except MarketDataError:
             await message.answer("Không thể lấy dữ liệu giá. Vui lòng thử lại sau.")
+            return
+        except Exception as exc:
+            logger.error("telegram_price_failed", error=str(exc))
+            await message.answer("Không thể lấy dữ liệu giá. Vui lòng thử lại sau.")
+            return
+
+        if quote is None:
+            await message.answer("Không tìm thấy dữ liệu giá cho mã này.")
             return
 
         await message.answer(build_price_message(quote))
@@ -324,17 +418,29 @@ def create_router(  # noqa: PLR0915
             return
 
         try:
+            recognized_sources_only = getattr(command, "command", "") == "new"
             if stock_analysis_service is not None and stock_analysis_service.is_enabled:
                 articles, analysis = await stock_analysis_service.fetch_and_analyze_news(
                     symbol,
                     limit=_DEFAULT_NEWS_LIMIT,
                 )
             else:
-                articles = await market_data_service.get_news(
-                    command.args,
-                    limit=_DEFAULT_NEWS_LIMIT,
-                )
+                if news_query_handler is not None:
+                    articles = await news_query_handler.handle(
+                        GetNewsQuery(symbol=symbol, limit=_DEFAULT_NEWS_LIMIT),
+                    )
+                else:
+                    articles = await market_data_service.get_news(
+                        symbol,
+                        limit=_DEFAULT_NEWS_LIMIT,
+                    )
                 articles = select_recent_unique_news(articles, limit=_DEFAULT_NEWS_LIMIT)
+                analysis = None
+
+            if recognized_sources_only:
+                articles = [
+                    article for article in articles if is_recognized_financial_source(article)
+                ]
                 analysis = None
         except InvalidSymbolError as exc:
             await message.answer(str(exc))
@@ -342,14 +448,22 @@ def create_router(  # noqa: PLR0915
         except MarketDataError:
             await message.answer("Không thể lấy tin tức. Vui lòng thử lại sau.")
             return
+        except Exception as exc:
+            logger.error("telegram_news_failed", symbol=symbol, error=str(exc))
+            await message.answer("Không thể lấy tin tức. Vui lòng thử lại sau.")
+            return
 
-        response = build_news_message(symbol=symbol, articles=articles)
+        response = build_news_message(
+            symbol=symbol,
+            articles=articles,
+            recognized_sources_only=recognized_sources_only,
+        )
         if analysis is not None:
             response = append_ai_news_section(response, analysis)
         await message.answer(response)
 
     @router.message(Command("analysis"))
-    async def analysis(message: Message, command: CommandObject) -> None:
+    async def analysis(message: Message, command: CommandObject) -> None:  # noqa: PLR0911
         if not is_authorized_user(message.from_user, settings.telegram):
             await reject_unauthorized(message)
             return
@@ -363,6 +477,12 @@ def create_router(  # noqa: PLR0915
         if stock_analysis_service is None:
             await message.answer("Dịch vụ phân tích chưa được cấu hình.")
             return
+        if not stock_analysis_service.is_enabled:
+            await message.answer(
+                "Phân tích AI chưa được bật. "
+                "Bạn có thể dùng /price hoặc /news để xem dữ liệu hiện có.",
+            )
+            return
 
         thinking = await message.answer(f"⏳ Đang phân tích <b>{symbol}</b>...")
         try:
@@ -375,6 +495,12 @@ def create_router(  # noqa: PLR0915
             await thinking.edit_text(str(exc))
             return
         except MarketDataError:
+            await thinking.edit_text(
+                "Không thể phân tích dữ liệu thị trường. Vui lòng thử lại sau.",
+            )
+            return
+        except Exception as exc:
+            logger.error("telegram_analysis_failed", symbol=symbol, error=str(exc))
             await thinking.edit_text(
                 "Không thể phân tích dữ liệu thị trường. Vui lòng thử lại sau.",
             )
@@ -416,7 +542,7 @@ def create_router(  # noqa: PLR0915
                 "Không thể gửi báo cáo phân tích thị trường. Vui lòng thử lại sau.",
             )
 
-    async def _run_financial_command(
+    async def _run_financial_command(  # noqa: PLR0911
         message: Message,
         command: CommandObject,
         period_default: str = "1Y",
@@ -448,6 +574,31 @@ def create_router(  # noqa: PLR0915
         )
         try:
             dashboard = await financial_analysis_service.analyze(symbol, period)
+        except FinancialProviderUnavailableError:
+            snapshot = (
+                await financial_snapshot_service.get_latest(symbol, period.label)
+                if financial_snapshot_service is not None
+                else None
+            )
+            if snapshot is not None:
+                saved_at = snapshot.created_at.strftime("%d/%m/%Y %H:%M")
+                await deliver_html_messages(
+                    thinking,
+                    "\n".join(
+                        [
+                            "⚠️ <b>Nguồn dữ liệu tài chính đang gián đoạn.</b>",
+                            f"Hiển thị báo cáo đã lưu lúc {saved_at} ({snapshot.period}).",
+                            "",
+                            snapshot.telegram_html,
+                        ],
+                    ),
+                )
+                return
+            await thinking.edit_text(
+                "Nguồn dữ liệu tài chính hiện không phản hồi. "
+                "Vui lòng thử lại sau; hệ thống chưa thể xác nhận dữ liệu của mã này.",
+            )
+            return
         except FinancialDataNotFoundError:
             await thinking.edit_text(
                 "\n".join(
@@ -509,7 +660,7 @@ def create_router(  # noqa: PLR0915
         await _run_financial_command(message, command, period_default="1Y")
 
     @router.message(Command("compare"))
-    async def compare(message: Message, command: CommandObject) -> None:
+    async def compare(message: Message, command: CommandObject) -> None:  # noqa: PLR0911
         if not is_authorized_user(message.from_user, settings.telegram):
             await reject_unauthorized(message)
             return
@@ -541,6 +692,11 @@ def create_router(  # noqa: PLR0915
         )
         try:
             result = await financial_analysis_service.compare(symbol_a, symbol_b, period)
+        except FinancialProviderUnavailableError:
+            await thinking.edit_text(
+                "Nguồn dữ liệu tài chính hiện không phản hồi. Vui lòng thử lại sau.",
+            )
+            return
         except FinancialDataNotFoundError:
             await thinking.edit_text(
                 "Không tìm thấy dữ liệu tài chính cho hai mã đã chọn. Vui lòng thử mã khác.",
@@ -578,15 +734,21 @@ def create_router(  # noqa: PLR0915
         try:
             if command_name == "why":
                 explanation = await trace_service.explain(symbol, limit=10)
+                reasons = explanation.reasons or (
+                    "Chưa có sự kiện đủ căn cứ để xác định nguyên nhân.",
+                )
+                risks = explanation.risks or (
+                    "Chưa ghi nhận rủi ro định lượng từ các sự kiện đã ingest.",
+                )
                 lines = [
                     f"<b>Giải thích {explanation.symbol}</b>",
                     explanation.summary,
                     "",
                     "<b>Nguyên nhân</b>",
-                    *(f"- {reason}" for reason in explanation.reasons),
+                    *(f"- {reason}" for reason in reasons),
                     "",
                     "<b>Rủi ro</b>",
-                    *(f"- {risk}" for risk in explanation.risks),
+                    *(f"- {risk}" for risk in risks),
                     "",
                     "<b>Theo dõi tiếp</b>",
                     *(f"- {item}" for item in explanation.next_watch),
@@ -600,27 +762,7 @@ def create_router(  # noqa: PLR0915
             await thinking.edit_text(f"Không thể theo dõi diễn biến của <b>{symbol}</b>.")
             return
 
-        score = timeline.score
-        lines = [
-            f"<b>Theo dõi diễn biến {timeline.symbol}</b>",
-            f"Tín hiệu: {score.signal_score}/100",
-            f"Rủi ro: {score.risk_score}/100",
-            f"Độ tin cậy: {score.conviction_score}/100",
-            f"Sự kiện: {score.event_count}",
-        ]
-
-        if not timeline.events:
-            lines.append("")
-            lines.append("Chưa có sự kiện theo dõi chính thống cho mã này.")
-        else:
-            lines.append("")
-            lines.append("<b>Sự kiện mới nhất</b>")
-            for event in timeline.events[:5]:
-                lines.append(
-                    f"- [{event.severity.value}] {event.title} " f"({event.source.code})",
-                )
-
-        await deliver_html_messages(thinking, "\n".join(lines))
+        await deliver_html_messages(thinking, _build_trace_command_response(timeline, command_name))
 
     @router.message(Command("trace", "why", "signals", "risks"))
     async def trace(message: Message, command: CommandObject) -> None:

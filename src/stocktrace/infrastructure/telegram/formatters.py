@@ -6,6 +6,7 @@ from decimal import Decimal
 from html import escape
 
 from stocktrace.ai.models import StockAnalysisResult
+from stocktrace.application.services.liquidity_analysis_service import LiquidityAssessment
 from stocktrace.application.services.market_analysis_service import MarketAnalysisBundle
 from stocktrace.application.services.market_data import HistoricalPrice, NewsArticle, StockQuote
 from stocktrace.application.services.news_analysis_service import NewsSentimentResult

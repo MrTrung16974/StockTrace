@@ -8,6 +8,23 @@ from datetime import UTC, datetime, timedelta
 from stocktrace.application.services.market_data import NewsArticle
 
 MAX_NEWS_AGE_DAYS = 7
+RECOGNIZED_FINANCIAL_SOURCE_NAMES = (
+    "cafef",
+    "vietstock",
+    "vneconomy",
+    "vietnambiz",
+    "vietcap",
+    "ssi",
+    "vnexpress",
+    "reuters",
+    "bloomberg",
+)
+
+
+def is_recognized_financial_source(article: NewsArticle) -> bool:
+    """Return whether an article's publisher is in the recognized source list."""
+    source = article.source.lower()
+    return any(name in source for name in RECOGNIZED_FINANCIAL_SOURCE_NAMES)
 
 
 def select_recent_unique_news(

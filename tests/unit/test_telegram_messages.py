@@ -52,6 +52,8 @@ def test_build_status_message_uses_settings() -> None:
     assert "Môi trường: test" in message
     assert "Cơ sở dữ liệu: SQLite" in message
     assert "AI đã bật: False" in message
+    assert "Telegram: chưa cấu hình bot token" in message
+    assert "Scheduler: bật theo cấu hình" in message
 
 
 def test_build_watchlist_message_handles_empty_list() -> None:
@@ -123,3 +125,13 @@ def test_build_news_message_handles_empty_articles() -> None:
         symbol="FPT",
         articles=[],
     )
+
+
+def test_build_news_message_labels_recognized_source_mode() -> None:
+    message = build_news_message(
+        symbol="FPT",
+        articles=[],
+        recognized_sources_only=True,
+    )
+
+    assert "nguồn đã nhận diện" in message

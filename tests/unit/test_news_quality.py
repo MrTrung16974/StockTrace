@@ -3,7 +3,10 @@
 from datetime import UTC, datetime, timedelta
 
 from stocktrace.application.services.market_data import NewsArticle
-from stocktrace.application.services.news_quality import select_recent_unique_news
+from stocktrace.application.services.news_quality import (
+    is_recognized_financial_source,
+    select_recent_unique_news,
+)
 
 
 def _article(
@@ -48,3 +51,18 @@ def test_news_selection_retains_unknown_publication_time_within_limit() -> None:
     )
 
     assert len(selected) == 1
+
+
+def test_recognized_financial_source_is_identified() -> None:
+    article = _article("MBB update", "https://example.com/1", None)
+
+    assert is_recognized_financial_source(article)
+    assert not is_recognized_financial_source(
+        NewsArticle(
+            ticker="MBB",
+            title="MBB update",
+            summary=None,
+            url="https://example.com/2",
+            source="Unknown publisher",
+        ),
+    )

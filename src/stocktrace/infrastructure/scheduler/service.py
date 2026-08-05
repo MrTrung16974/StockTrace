@@ -30,6 +30,7 @@ from stocktrace.infrastructure.scheduler.market_hours import is_vn_market_open
 from stocktrace.infrastructure.scheduler.price_alert_job import PriceAlertJob
 from stocktrace.infrastructure.scheduler.protocols import TelegramMessageBot
 from stocktrace.infrastructure.scheduler.stock_analysis_job import StockAnalysisJob
+from stocktrace.infrastructure.scheduler.trace_ingestion_job import TraceIngestionJob
 
 T = TypeVar("T")
 ONE_HOUR_MINUTES = 60
@@ -52,6 +53,7 @@ class SchedulerService:
         financial_analysis_job: FinancialAnalysisJob | None = None,
         price_alert_job: PriceAlertJob | None = None,
         policy_news_analyzer: PolicyNewsAnalyzer | None = None,
+        trace_ingestion_job: TraceIngestionJob | None = None,
     ) -> None:
         self._quote_handler = quote_handler
         self._news_handler = news_handler
@@ -63,6 +65,7 @@ class SchedulerService:
         self._financial_analysis_job = financial_analysis_job
         self._price_alert_job = price_alert_job
         self._policy_news_analyzer = policy_news_analyzer or PolicyNewsAnalyzer()
+        self._trace_ingestion_job = trace_ingestion_job
         self._timezone = ZoneInfo(settings.scheduler.timezone)
         self._scheduler = scheduler or AsyncIOScheduler(timezone=self._timezone)
         self._logger = get_logger(__name__)
@@ -204,6 +207,21 @@ class SchedulerService:
             )
             has_job = True
 
+        if self._trace_ingestion_job is not None and self._settings.scheduler.trace_ingest_enabled:
+            self._scheduler.add_job(
+                self._trace_ingestion_job.run,
+                CronTrigger(
+                    hour=self._settings.scheduler.trace_ingest_hour,
+                    minute=15,
+                    timezone=self._timezone,
+                ),
+                id="stocktrace-trace-official-ingest",
+                replace_existing=True,
+                max_instances=1,
+                coalesce=True,
+            )
+            has_job = True
+
         if not has_job:
             self._logger.info("scheduler_skipped", reason="all_jobs_disabled")
             return
@@ -336,11 +354,14 @@ class SchedulerService:
         if chat_id is None:
             return []
         items = await self._watchlist_service.list_symbols(owner_id=chat_id)
+        symbols = [item.symbol.upper() for item in items]
+        if not symbols:
+            symbols = [symbol.upper() for symbol in self._settings.scheduler.watchlist_symbols]
         disabled = {symbol.upper() for symbol in self._settings.scheduler.disabled_symbols}
         return [
-            item.symbol.upper()
-            for item in items
-            if item.symbol.upper() not in disabled
+            symbol
+            for symbol in symbols
+            if symbol not in disabled
         ]
 
     async def _run_with_retry(

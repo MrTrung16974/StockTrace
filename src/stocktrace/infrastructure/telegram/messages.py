@@ -10,6 +10,7 @@ from html import escape
 from stocktrace.ai.models import StockAnalysisResult
 from stocktrace.application.services.market_analysis_service import MarketAnalysisBundle
 from stocktrace.application.services.market_data import NewsArticle, StockQuote
+from stocktrace.application.services.news_quality import is_recognized_financial_source
 from stocktrace.application.services.policy_news_analysis import PolicyNewsAnalyzer
 from stocktrace.application.services.stock_analysis_service import AnalysisBundle
 from stocktrace.domain.entities.watchlist_item import WatchlistItem
@@ -20,19 +21,6 @@ _MAX_DECIMAL_PLACES = -2
 _MINUTES_PER_HOUR = 60
 _HOURS_PER_DAY = 24
 _POLICY_NEWS_ANALYZER = PolicyNewsAnalyzer()
-_FINANCIAL_NEWS_SOURCES = (
-    "cafef",
-    "vietstock",
-    "vneconomy",
-    "vietnambiz",
-    "vietcap",
-    "ssi",
-    "vnexpress",
-    "reuters",
-    "bloomberg",
-)
-
-
 def build_bot_command_specs() -> tuple[BotCommandSpec, ...]:
     """Build Telegram bot command menu specs."""
     return (
@@ -113,6 +101,12 @@ def build_help_message() -> str:
 def build_status_message(settings: Settings) -> str:
     """Build the /status response."""
     database_backend = "SQLite" if settings.database.is_sqlite else "PostgreSQL"
+    token = settings.telegram.bot_token
+    telegram_configured = token is not None and token.get_secret_value().strip() != ""
+    telegram_status = (
+        "đã cấu hình, polling bật" if telegram_configured else "chưa cấu hình bot token"
+    )
+    scheduler_status = "bật theo cấu hình" if settings.scheduler.enabled else "đã tắt theo cấu hình"
     return "\n".join(
         [
             "Trạng thái StockTrace",
@@ -120,9 +114,10 @@ def build_status_message(settings: Settings) -> str:
             f"Phiên bản: {settings.app.version}",
             f"Môi trường: {settings.environment.value}",
             f"Cơ sở dữ liệu: {database_backend}",
-            f"Redis đã bật: {settings.redis.enabled}",
+            f"Redis được cấu hình: {settings.redis.enabled}",
             f"AI đã bật: {settings.ai.enabled}",
-            "Telegram: đã kết nối",
+            f"Scheduler: {scheduler_status}",
+            f"Telegram: {telegram_status}",
         ],
     )
 
@@ -159,10 +154,19 @@ def build_price_message(quote: StockQuote) -> str:
     )
 
 
-def build_news_message(symbol: str, articles: Sequence[NewsArticle]) -> str:
+def build_news_message(
+    symbol: str,
+    articles: Sequence[NewsArticle],
+    *,
+    recognized_sources_only: bool = False,
+) -> str:
     """Build a source-aware /news response."""
     clean_symbol = escape(symbol)
     if not articles:
+        if recognized_sources_only:
+            return (
+                f"Không có tin mới từ nguồn đã nhận diện cho {clean_symbol} trong 7 ngày gần đây."
+            )
         return (
             f"Không có tin mới trong 7 ngày gần đây cho {clean_symbol}. "
             "Để tránh tin cũ hoặc trùng lặp, hệ thống không hiển thị các bài đó."
@@ -170,7 +174,11 @@ def build_news_message(symbol: str, articles: Sequence[NewsArticle]) -> str:
 
     now = datetime.now(tz=UTC)
     lines = [
-        f"📰 Tin tức đã lọc — {clean_symbol}",
+        (
+            f"📰 Tin từ nguồn đã nhận diện — {clean_symbol}"
+            if recognized_sources_only
+            else f"📰 Tin tức đã lọc — {clean_symbol}"
+        ),
         "Chỉ hiển thị tin mới, không trùng lặp. Nhãn tác động không phải khuyến nghị giao dịch.",
         "",
     ]
@@ -201,8 +209,7 @@ def _published_label(published_at: datetime | None, now: datetime) -> str:
 
 
 def _source_quality_label(article: NewsArticle) -> str:
-    source = article.source.lower()
-    if any(name in source for name in _FINANCIAL_NEWS_SOURCES):
+    if is_recognized_financial_source(article):
         return "nguồn tin tài chính đã nhận diện"
     return "nguồn tổng hợp — nên đối chiếu bài gốc"
 

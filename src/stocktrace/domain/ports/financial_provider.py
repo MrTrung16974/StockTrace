@@ -22,6 +22,10 @@ class FinancialDataNotFoundError(FinancialProviderError):
     """Raised when no financial data exists for a symbol."""
 
 
+class FinancialProviderUnavailableError(FinancialProviderError):
+    """Raised when a provider cannot confirm whether financial data exists."""
+
+
 class FinancialProvider(Protocol):
     """Port for retrieving financial statement data from external sources."""
 

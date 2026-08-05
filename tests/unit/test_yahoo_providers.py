@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from decimal import Decimal
+from email.utils import format_datetime
 
 import pytest
 import respx
@@ -12,6 +14,11 @@ from stocktrace.infrastructure.news.yahoo import YahooFinanceNewsProvider
 from stocktrace.infrastructure.providers.yahoo import YahooFinanceQuoteProvider
 
 HPG_VOLUME = 20_573_500
+
+
+def _fresh_rss_date() -> str:
+    """Return an RFC 2822 date inside the provider's news-age window."""
+    return format_datetime(datetime.now(tz=UTC))
 
 
 @pytest.mark.asyncio
@@ -170,20 +177,21 @@ async def test_yahoo_news_provider_parses_rss_response() -> None:
 @pytest.mark.asyncio
 @respx.mock
 async def test_vietnam_news_provider_prefers_google_news() -> None:
+    published_at = _fresh_rss_date()
     yahoo_route = respx.get("https://feeds.finance.yahoo.com/rss/2.0/headline").mock(
         return_value=Response(200, text="<rss><channel /></rss>"),
     )
     google_route = respx.get("https://news.google.com/rss/search").mock(
         return_value=Response(
             200,
-            text="""<?xml version="1.0"?>
+            text=f"""<?xml version="1.0"?>
             <rss version="2.0">
               <channel>
                 <item>
                   <title>Cổ phiếu HPG tăng nhờ triển vọng thép</title>
                   <link>https://example.com/hpg</link>
                   <source>Vietstock</source>
-                  <pubDate>Tue, 02 Jun 2026 10:00:00 GMT</pubDate>
+                      <pubDate>{published_at}</pubDate>
                 </item>
               </channel>
             </rss>""",
@@ -204,17 +212,18 @@ async def test_vietnam_news_provider_prefers_google_news() -> None:
 @pytest.mark.asyncio
 @respx.mock
 async def test_vietnam_news_provider_filters_unrelated_and_old_google_results() -> None:
+    published_at = _fresh_rss_date()
     respx.get("https://news.google.com/rss/search").mock(
         return_value=Response(
             200,
-            text="""<?xml version="1.0"?>
+            text=f"""<?xml version="1.0"?>
             <rss version="2.0">
               <channel>
                 <item>
                   <title>Kulicke &amp; Soffa: Buy On The TCB Inflection</title>
                   <link>https://seekingalpha.com/article/tcb-inflection</link>
                   <source>seekingalpha.com</source>
-                  <pubDate>Tue, 02 Jun 2026 10:00:00 GMT</pubDate>
+                  <pubDate>{published_at}</pubDate>
                 </item>
                 <item>
                   <title>TCB Stock Price and Chart</title>
@@ -226,7 +235,7 @@ async def test_vietnam_news_provider_filters_unrelated_and_old_google_results() 
                   <title>Cổ phiếu TCB hút dòng tiền ngân hàng</title>
                   <link>https://vietstock.vn/tcb-ngan-hang.htm</link>
                   <source>Vietstock</source>
-                  <pubDate>Tue, 02 Jun 2026 10:00:00 GMT</pubDate>
+                  <pubDate>{published_at}</pubDate>
                 </item>
               </channel>
             </rss>""",
@@ -243,17 +252,18 @@ async def test_vietnam_news_provider_filters_unrelated_and_old_google_results() 
 @pytest.mark.asyncio
 @respx.mock
 async def test_vietnam_news_provider_accepts_official_policy_source() -> None:
+    published_at = _fresh_rss_date()
     respx.get("https://news.google.com/rss/search").mock(
         return_value=Response(
             200,
-            text="""<?xml version="1.0"?>
+            text=f"""<?xml version="1.0"?>
             <rss version="2.0">
               <channel>
                 <item>
                   <title>MBB quyet dinh dieu chinh lai suat</title>
                   <link>https://news.google.com/rss/articles/example</link>
                   <source>Ngân hàng Nhà nước Việt Nam</source>
-                  <pubDate>Tue, 02 Jun 2026 10:00:00 GMT</pubDate>
+                  <pubDate>{published_at}</pubDate>
                 </item>
               </channel>
             </rss>""",

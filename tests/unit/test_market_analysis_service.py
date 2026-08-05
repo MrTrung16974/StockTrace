@@ -1,17 +1,18 @@
-import pytest
-from unittest.mock import AsyncMock, MagicMock
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 from decimal import Decimal
+from unittest.mock import AsyncMock
 
-from stocktrace.application.services.market_analysis_service import MarketAnalysisService
-from stocktrace.application.services.market_data import StockQuote, NewsArticle
+import pytest
+
 from stocktrace.ai.models import MarketAnalysisResult, SentimentLabel
+from stocktrace.application.services.market_analysis_service import MarketAnalysisService
+from stocktrace.application.services.market_data import NewsArticle, StockQuote
 
 
 @pytest.fixture
 def mock_market_data_service():
     service = AsyncMock()
-    service.get_quote.return_value = StockQuote(
+    service.get_provider_quote.return_value = StockQuote(
         ticker="DUMMY",
         company_name="Dummy",
         current_price=Decimal("10.0"),
@@ -69,6 +70,11 @@ async def test_market_analysis_service_success(mock_market_data_service, mock_an
     assert len(bundle.news) == 1
     assert bundle.analysis is not None
     assert bundle.analysis.sentiment == SentimentLabel.POSITIVE
+    provider_symbols = [
+        call.args[0] for call in mock_market_data_service.get_provider_quote.await_args_list
+    ]
+    assert "^VNINDEX" in provider_symbols
+    mock_market_data_service.get_quote.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -86,7 +92,10 @@ async def test_market_analysis_service_ai_disabled(mock_market_data_service, moc
 
 
 @pytest.mark.asyncio
-async def test_market_analysis_service_partial_data_failure(mock_market_data_service, mock_analysis_service):
+async def test_market_analysis_service_partial_data_failure(
+    mock_market_data_service,
+    mock_analysis_service,
+):
     # Simulate quote failure for some indices
     async def side_effect(ticker):
         if ticker == "^VNINDEX":
@@ -104,8 +113,8 @@ async def test_market_analysis_service_partial_data_failure(mock_market_data_ser
             timestamp=datetime.now(UTC),
         )
 
-    mock_market_data_service.get_quote.side_effect = side_effect
-    
+    mock_market_data_service.get_provider_quote.side_effect = side_effect
+
     service = MarketAnalysisService(
         analysis_service=mock_analysis_service,
         market_data_service=mock_market_data_service,

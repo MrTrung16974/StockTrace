@@ -11,6 +11,7 @@ from typing import Protocol
 from stocktrace.application.services.financial.financial_analysis_service import (
     FinancialAnalysisService,
 )
+from stocktrace.application.services.financial.snapshot_service import FinancialSnapshotService
 from stocktrace.application.services.trace.scoring_engine import TraceScoringEngine
 from stocktrace.application.services.trace.source_catalog import official_trace_sources
 from stocktrace.domain.entities.trace import (
@@ -23,7 +24,10 @@ from stocktrace.domain.entities.trace import (
     TraceSourceType,
     TraceTimeline,
 )
-from stocktrace.domain.ports.financial_provider import FinancialDataNotFoundError
+from stocktrace.domain.ports.financial_provider import (
+    FinancialDataNotFoundError,
+    FinancialProviderUnavailableError,
+)
 from stocktrace.domain.repositories.trace import TraceEventRepository, TraceSourceRepository
 from stocktrace.domain.value_objects.financial_period import FinancialPeriod
 
@@ -55,10 +59,12 @@ class TraceService:
         self,
         repository_context_factory: TraceRepositoryFactory,
         financial_analysis_service: FinancialAnalysisService | None = None,
+        financial_snapshot_service: FinancialSnapshotService | None = None,
         scoring_engine: TraceScoringEngine | None = None,
     ) -> None:
         self._repository_context_factory = repository_context_factory
         self._financial_analysis_service = financial_analysis_service
+        self._financial_snapshot_service = financial_snapshot_service
         self._scoring = scoring_engine or TraceScoringEngine()
 
     async def seed_official_sources(self) -> None:
@@ -117,7 +123,8 @@ class TraceService:
             return TraceExplanation(
                 symbol=timeline.symbol,
                 summary=(
-                    "Chưa có sự kiện trace đã ingest từ nguồn công bố chính thống cho mã này."
+                    "Chưa có sự kiện trace chính thức đã được ingest cho mã này. "
+                    "Hệ thống chưa có bản ghi công bố phù hợp để kết luận nguyên nhân."
                 ),
                 reasons=(),
                 risks=(),
@@ -166,8 +173,8 @@ class TraceService:
                 symbol,
                 FinancialPeriod.parse("1Y"),
             )
-        except FinancialDataNotFoundError:
-            return ()
+        except (FinancialDataNotFoundError, FinancialProviderUnavailableError):
+            return await self._build_snapshot_fallback_events(symbol)
 
         analysis = dashboard.analysis
         score = analysis.score
@@ -263,6 +270,69 @@ class TraceService:
             )
 
         return tuple(events)
+
+    async def _build_snapshot_fallback_events(self, symbol: str) -> tuple[StockTraceEvent, ...]:
+        """Build conservative trace events from the last successful financial snapshot."""
+        if self._financial_snapshot_service is None:
+            return ()
+
+        snapshot = await self._financial_snapshot_service.get_latest(symbol, "1Y")
+        if snapshot is None:
+            return ()
+
+        payload = snapshot.json_payload
+        score = Decimal(str(payload.get("financial_score", 0)))
+        recommendation = str(payload.get("recommendation", "N/A"))
+        valuation = payload.get("valuation", {})
+        valuation_status = str(valuation.get("status", "N/A"))
+        created_at = snapshot.created_at
+
+        return (
+            StockTraceEvent(
+                symbol=symbol,
+                event_type=TraceEventType.TRACE_FINANCIAL_STATEMENT,
+                severity=self._severity_from_score(score),
+                title=f"Điểm tài chính đã lưu {symbol}: {score}/10",
+                summary=(
+                    "Tín hiệu được dựng từ báo cáo tài chính đã lưu vì nguồn dữ liệu "
+                    "hiện không phản hồi; không phải công bố chính thức mới."
+                ),
+                source=_FINANCIAL_FALLBACK_SOURCE,
+                reasons=(
+                    TraceReason(
+                        label="Điểm tài chính",
+                        detail=f"{score}/10, khuyến nghị {recommendation}.",
+                        weight=Decimal("0.7"),
+                    ),
+                ),
+                confidence=Decimal("0.55"),
+                occurred_at=created_at,
+                created_at=created_at,
+                metadata={"fallback": "financial_snapshot"},
+            ),
+            StockTraceEvent(
+                symbol=symbol,
+                event_type=TraceEventType.TRACE_FINANCIAL_STATEMENT,
+                severity=TraceSeverity.INFO,
+                title=f"Định giá đã lưu {symbol}: {valuation_status}",
+                summary=(
+                    "Định giá được lấy từ báo cáo đã lưu gần nhất và cần được cập nhật "
+                    "lại khi nguồn dữ liệu hoạt động."
+                ),
+                source=_FINANCIAL_FALLBACK_SOURCE,
+                reasons=(
+                    TraceReason(
+                        label="Định giá",
+                        detail=f"Trạng thái định giá: {valuation_status}.",
+                        weight=Decimal("0.6"),
+                    ),
+                ),
+                confidence=Decimal("0.50"),
+                occurred_at=created_at,
+                created_at=created_at,
+                metadata={"fallback": "financial_snapshot"},
+            ),
+        )
 
     def _severity_from_score(self, score: Decimal) -> TraceSeverity:
         if score >= Decimal("7"):

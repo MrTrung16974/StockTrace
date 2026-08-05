@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from enum import StrEnum
 from functools import lru_cache
+from typing import Annotated
 
 from pydantic import AliasChoices, BaseModel, Field, SecretStr, field_validator, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 class Environment(StrEnum):
@@ -128,6 +129,7 @@ class ProvidersSettings(BaseModel):
     """External provider execution policy."""
 
     request_timeout_seconds: float = Field(default=10.0, gt=0)
+    ca_bundle_path: str | None = None
     max_retries: int = Field(default=3, ge=0)
     circuit_breaker_failure_threshold: int = Field(default=5, ge=1)
     circuit_breaker_reset_seconds: int = Field(default=60, ge=1)
@@ -138,8 +140,8 @@ class SchedulerSettings(BaseModel):
 
     enabled: bool = True
     timezone: str = "Asia/Ho_Chi_Minh"
-    watchlist_symbols: list[str] = Field(default_factory=list)
-    disabled_symbols: list[str] = Field(default_factory=list)
+    watchlist_symbols: Annotated[list[str], NoDecode] = Field(default_factory=list)
+    disabled_symbols: Annotated[list[str], NoDecode] = Field(default_factory=list)
     price_enabled: bool = True
     news_enabled: bool = True
     news_digest_hours: list[int] = Field(default_factory=lambda: [8, 12, 16, 20])
@@ -147,7 +149,7 @@ class SchedulerSettings(BaseModel):
     news_digest_limit: int = Field(default=5, ge=1, le=20)
     news_symbol_delay_seconds: float = Field(default=0.5, ge=0)
     analysis_enabled: bool = False
-    analysis_symbols: list[str] = Field(default_factory=list)
+    analysis_symbols: Annotated[list[str], NoDecode] = Field(default_factory=list)
     morning_report_hour: int = Field(default=8, ge=0, le=23)
     evening_report_hour: int = Field(default=20, ge=0, le=23)
     financial_daily_report_enabled: bool = True
@@ -156,6 +158,9 @@ class SchedulerSettings(BaseModel):
     market_daily_report_hour: int = Field(default=16, ge=0, le=23)
     market_morning_report_hour: int = Field(default=7, ge=0, le=23)
     market_evening_report_hour: int = Field(default=19, ge=0, le=23)
+    trace_ingest_enabled: bool = True
+    trace_ingest_hour: int = Field(default=7, ge=0, le=23)
+    trace_ingest_limit: int = Field(default=20, ge=1, le=100)
 
     @field_validator("watchlist_symbols", mode="before")
     @classmethod

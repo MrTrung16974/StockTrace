@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any, cast
@@ -21,12 +22,13 @@ from stocktrace.infrastructure.config import (
     Settings,
     TelegramSettings,
 )
-from stocktrace.infrastructure.scheduler.service import SchedulerService
 from stocktrace.infrastructure.scheduler.financial_job import FinancialAnalysisJob
+from stocktrace.infrastructure.scheduler.service import SchedulerService
 
 PRICE_INTERVAL_MINUTES = 1
 NEWS_DIGEST_HOURS = [8, 12, 16, 20]
 FINANCIAL_DAILY_REPORT_HOUR = 9
+TWO_ITEMS = 2
 MARKET_OPEN_TIME = datetime(2026, 6, 8, 10, 0, tzinfo=ZoneInfo("Asia/Ho_Chi_Minh"))
 
 
@@ -105,7 +107,7 @@ class FakeWatchlistService:
     """Watchlist service test double."""
 
     def __init__(self, symbols: list[str] | None = None) -> None:
-        self.symbols = symbols or ["FPT", "VCB"]
+        self.symbols = symbols if symbols is not None else ["FPT", "VCB"]
         self.owner_ids: list[str] = []
 
     async def list_symbols(self, owner_id: str) -> list[WatchlistItem]:
@@ -137,6 +139,13 @@ class FakeFinancialAnalysisJob:
         return None
 
 
+class FakeTraceIngestionJob:
+    """Trace ingestion double used to verify scheduler registration."""
+
+    async def run(self) -> None:
+        return None
+
+
 class FakeFinancialService:
     """Financial service double that records scheduled analyses."""
 
@@ -146,6 +155,21 @@ class FakeFinancialService:
     async def analyze(self, symbol: str, period: Any) -> Any:
         self.calls.append((symbol, str(period)))
         return type("Dashboard", (), {"telegram_html": f"<b>{symbol}</b>"})()
+
+
+class FakeFinancialSnapshotRepository:
+    """Snapshot repository double that records completed dashboards."""
+
+    def __init__(self) -> None:
+        self.dashboards: list[Any] = []
+
+    async def save_dashboard(self, dashboard: Any) -> None:
+        self.dashboards.append(dashboard)
+
+
+@asynccontextmanager
+async def _snapshot_repository_context(repository: FakeFinancialSnapshotRepository):
+    yield repository
 
 
 def _settings() -> Settings:
@@ -189,6 +213,28 @@ async def test_scheduler_registers_daily_financial_report_at_9am() -> None:
     job = scheduler.get_job("stocktrace-financial-daily-report")
     assert job is not None
     assert str(job.trigger).startswith("cron[hour='9', minute='0']")
+
+    await service.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_scheduler_registers_official_trace_ingestion_job() -> None:
+    scheduler = AsyncIOScheduler(timezone=ZoneInfo("Asia/Ho_Chi_Minh"))
+    service = SchedulerService(
+        quote_handler=cast(Any, FakeQuoteHandler()),
+        news_handler=cast(Any, FakeNewsHandler()),
+        watchlist_service=cast(Any, FakeWatchlistService()),
+        bot=cast(Any, FakeBot()),
+        settings=_settings(),
+        scheduler=scheduler,
+        trace_ingestion_job=cast(Any, FakeTraceIngestionJob()),
+    )
+
+    service.start()
+
+    job = scheduler.get_job("stocktrace-trace-official-ingest")
+    assert job is not None
+    assert str(job.trigger).startswith("cron[hour='7', minute='15']")
 
     await service.shutdown()
 
@@ -253,9 +299,29 @@ async def test_daily_financial_job_sends_a_dashboard_for_each_watchlist_symbol()
         await job.send_daily_financial_reports()
 
     assert [symbol for symbol, _ in financial_service.calls] == ["FPT", "VCB"]
-    assert len(bot.messages) == 2
+    assert len(bot.messages) == TWO_ITEMS
     assert all("Phân tích tài chính 09:00" in message["text"] for message in bot.messages)
-    assert deliver.await_count == 2
+    assert deliver.await_count == TWO_ITEMS
+
+
+@pytest.mark.asyncio
+async def test_financial_sync_persists_each_successful_dashboard() -> None:
+    financial_service = FakeFinancialService()
+    repository = FakeFinancialSnapshotRepository()
+    job = FinancialAnalysisJob(
+        financial_service=cast(Any, financial_service),
+        watchlist_service=cast(Any, FakeWatchlistService()),
+        bot=cast(Any, FakeBot()),
+        settings=_settings(),
+        snapshot_repository_context_factory=lambda: _snapshot_repository_context(repository),
+    )
+
+    await job.sync_financial_statements()
+
+    assert [dashboard.telegram_html for dashboard in repository.dashboards] == [
+        "<b>FPT</b>",
+        "<b>VCB</b>",
+    ]
 
 
 @pytest.mark.asyncio
@@ -346,7 +412,7 @@ async def test_price_alert_sends_every_run_during_market_hours() -> None:
         await service.send_price_alert()
         await service.send_price_alert()
 
-    assert len(bot.messages) == 2
+    assert len(bot.messages) == TWO_ITEMS
 
 
 @pytest.mark.asyncio
@@ -416,3 +482,26 @@ async def test_scheduler_uses_chat_watchlist_from_database() -> None:
 
     assert watchlist_service.owner_ids == ["chat-1"]
     assert [query.symbol for query in quote_handler.queries] == ["MBB"]
+
+
+@pytest.mark.asyncio
+async def test_scheduler_uses_configured_watchlist_when_database_list_is_empty() -> None:
+    bot = FakeBot()
+    quote_handler = FakeQuoteHandler()
+    settings = _settings()
+    settings.scheduler.watchlist_symbols = ["HPG", "FPT"]
+    service = SchedulerService(
+        quote_handler=cast(Any, quote_handler),
+        news_handler=cast(Any, FakeNewsHandler()),
+        watchlist_service=cast(Any, FakeWatchlistService(symbols=[])),
+        bot=cast(Any, bot),
+        settings=settings,
+    )
+
+    with patch(
+        "stocktrace.infrastructure.scheduler.service.datetime",
+    ) as mock_datetime:
+        mock_datetime.now.return_value = MARKET_OPEN_TIME
+        await service.send_price_alert()
+
+    assert [query.symbol for query in quote_handler.queries] == ["HPG", "FPT"]

@@ -1,3 +1,4 @@
+from decimal import Decimal
 from unittest.mock import AsyncMock
 
 import pytest
@@ -5,11 +6,19 @@ import pytest
 from stocktrace.application.services.financial.financial_analysis_service import (
     FinancialAnalysisService,
 )
+from stocktrace.application.services.trace import TraceScoringEngine, official_trace_sources
+from stocktrace.domain.entities.trace import (
+    StockTraceEvent,
+    TraceEventType,
+    TraceSeverity,
+    TraceTimeline,
+)
 from stocktrace.domain.value_objects.financial_period import FinancialPeriod
 from stocktrace.infrastructure.config.settings import Settings, TelegramSettings
 from stocktrace.infrastructure.providers.financial.mock_provider import MockFinancialProvider
 from stocktrace.infrastructure.telegram.aiogram_router import (
     _build_financial_command_response,
+    _build_trace_command_response,
     _financial_usage,
     create_router,
 )
@@ -69,6 +78,43 @@ def test_trace_commands_are_registered() -> None:
 def test_financial_usage_is_command_specific() -> None:
     assert _financial_usage("report") == "Cách dùng: /report MÃ (vd: /report HPG)"
     assert _financial_usage("score") == "Cách dùng: /score MÃ (vd: /score HPG)"
+
+
+def test_trace_commands_render_distinct_signal_and_risk_views() -> None:
+    events = (
+        StockTraceEvent(
+            symbol="HPG",
+            event_type=TraceEventType.TRACE_DISCLOSURE,
+            severity=TraceSeverity.INFO,
+            title="HPG disclosure",
+            summary="Disclosure",
+            source=official_trace_sources()[1],
+            confidence=Decimal("1"),
+        ),
+        StockTraceEvent(
+            symbol="HPG",
+            event_type=TraceEventType.TRACE_REGULATORY,
+            severity=TraceSeverity.HIGH,
+            title="HPG warning",
+            summary="Warning",
+            source=official_trace_sources()[3],
+            confidence=Decimal("1"),
+        ),
+    )
+    timeline = TraceTimeline(
+        symbol="HPG",
+        events=events,
+        score=TraceScoringEngine().calculate("HPG", events),
+    )
+
+    signals = _build_trace_command_response(timeline, "signals")
+    risks = _build_trace_command_response(timeline, "risks")
+
+    assert "Tín hiệu theo dõi" in signals
+    assert "HPG disclosure" in signals
+    assert "Rủi ro cần theo dõi" in risks
+    assert "HPG warning" in risks
+    assert "HPG disclosure" not in risks
 
 
 @pytest.mark.asyncio

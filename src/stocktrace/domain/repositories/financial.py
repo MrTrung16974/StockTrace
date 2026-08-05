@@ -6,11 +6,13 @@ from typing import Protocol
 
 from stocktrace.domain.entities.financial import (
     FinancialAnalysis,
+    FinancialDashboard,
     FinancialRatio,
     FinancialScore,
     FinancialStatement,
     Valuation,
 )
+from stocktrace.domain.entities.financial_snapshot import FinancialDashboardSnapshot
 
 
 class FinancialStatementRepository(Protocol):
@@ -66,6 +68,22 @@ class FinancialAnalysisRepository(Protocol):
 
     async def get_latest_analysis(self, symbol: str) -> FinancialAnalysis | None:
         """Retrieve the most recent analysis for a symbol."""
+        ...
+
+
+class FinancialDashboardSnapshotRepository(Protocol):
+    """Persistence port for a rendered financial dashboard snapshot."""
+
+    async def save_dashboard(self, dashboard: FinancialDashboard) -> None:
+        """Persist a dashboard produced by a successful financial sync."""
+        ...
+
+    async def get_latest_dashboard(
+        self,
+        symbol: str,
+        period: str,
+    ) -> FinancialDashboardSnapshot | None:
+        """Return the most recently persisted dashboard for a symbol and period."""
         ...
 
 
