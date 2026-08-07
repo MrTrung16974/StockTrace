@@ -13,6 +13,7 @@ from stocktrace.application.services.market_data import NewsArticle, StockQuote
 from stocktrace.application.services.news_quality import is_recognized_financial_source
 from stocktrace.application.services.policy_news_analysis import PolicyNewsAnalyzer
 from stocktrace.application.services.stock_analysis_service import AnalysisBundle
+from stocktrace.domain.entities.portfolio_item import PortfolioItem
 from stocktrace.domain.entities.watchlist_item import WatchlistItem
 from stocktrace.infrastructure.config import Settings
 
@@ -29,6 +30,9 @@ def build_bot_command_specs() -> tuple[BotCommandSpec, ...]:
         ("add", "thêm mã vào danh sách theo dõi"),
         ("remove", "xóa mã khỏi danh sách theo dõi"),
         ("list", "xem danh sách theo dõi"),
+        ("padd", "thêm mã vào danh mục đầu tư"),
+        ("prm", "xoá mã khỏi danh mục đầu tư"),
+        ("portfolio", "xem danh mục đầu tư dài hạn"),
         ("price", "giá mới nhất"),
         ("news", "tin tức mới nhất"),
         ("new", "tin tức đã lọc, có nguồn"),
@@ -73,6 +77,11 @@ def build_help_message() -> str:
             "/add SYMBOL",
             "/remove SYMBOL",
             "/list",
+            "",
+            "Quản lý danh mục dài hạn:",
+            "/padd SYMBOL QUANTITY PRICE",
+            "/prm SYMBOL",
+            "/portfolio",
             "/price SYMBOL",
             "/news SYMBOL",
             "/new SYMBOL (bí danh của /news)",
@@ -138,9 +147,34 @@ def build_added_message(symbol: str) -> str:
 
 def build_removed_message(symbol: str, removed: bool) -> str:
     """Build the /remove response."""
-    if removed:
-        return f"Đã xóa {symbol} khỏi danh sách theo dõi."
-    return f"{symbol} không có trong danh sách theo dõi."
+    if not removed:
+        return f"{symbol} không có trong danh sách theo dõi."
+    return f"Đã xoá {symbol} khỏi danh sách theo dõi."
+
+
+def build_portfolio_message(items: Sequence[PortfolioItem]) -> str:
+    """Build the /portfolio response."""
+    if not items:
+        return "Danh mục đầu tư đang trống. Dùng /padd MA SO_LUONG GIA để thêm."
+
+    lines = ["💼 Danh mục đầu tư dài hạn:"]
+    for index, item in enumerate(items, start=1):
+        lines.append(
+            f"{index}. <b>{item.symbol}</b> - {item.quantity} cổ phiếu, giá vốn: {_format_decimal(item.average_price, '')}"
+        )
+    return "\n".join(lines)
+
+
+def build_portfolio_added_message(symbol: str, quantity: int, price: Decimal) -> str:
+    """Build the /padd response."""
+    return f"Đã thêm/cập nhật {symbol} vào danh mục: {quantity} cổ phiếu, giá vốn {price}."
+
+
+def build_portfolio_removed_message(symbol: str, removed: bool) -> str:
+    """Build the /prm response."""
+    if not removed:
+        return f"{symbol} không có trong danh mục."
+    return f"Đã xoá {symbol} khỏi danh mục."
 
 
 def build_price_message(quote: StockQuote) -> str:

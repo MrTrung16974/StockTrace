@@ -108,22 +108,6 @@ def build_market_analysis_report(bundle: MarketAnalysisBundle) -> str:
             sections.append(f"<b>{name}</b>: {_NA}")
     sections.append("")
 
-    sections.extend([_DIVIDER, "", "📰 <b>TIN THỊ TRƯỜNG MỚI NHẤT</b>", ""])
-    if bundle.news:
-        for index, article in enumerate(bundle.news[:5], start=1):
-            published = (
-                article.published_at.astimezone().strftime("%d/%m %H:%M")
-                if article.published_at is not None
-                else "chưa xác minh giờ đăng"
-            )
-            sections.append(
-                f'{index}. <a href="{escape(article.url)}">{escape(article.title)}</a>'
-            )
-            sections.append(f"   {escape(article.source)} · {published}")
-        sections.append("")
-    else:
-        sections.extend(["Chưa có tin thị trường mới trong cửa sổ theo dõi.", ""])
-
     if bundle.analysis:
         analysis = bundle.analysis
         sections.extend([
@@ -172,9 +156,26 @@ def build_market_analysis_report(bundle: MarketAnalysisBundle) -> str:
             "🎯 <b>KẾT LUẬN</b>",
             "",
             escape(analysis.conclusion),
+            "",
         ])
     else:
-        sections.append("Không có phân tích AI.")
+        sections.extend([_DIVIDER, "", "Không có phân tích AI.", ""])
+
+    sections.extend([_DIVIDER, "", "📰 <b>TIN THỊ TRƯỜNG MỚI NHẤT (GOOGLE NEWS)</b>", ""])
+    if bundle.news:
+        for index, article in enumerate(bundle.news[:5], start=1):
+            published = (
+                article.published_at.astimezone().strftime("%d/%m %H:%M")
+                if article.published_at is not None
+                else "chưa xác minh giờ đăng"
+            )
+            sections.append(
+                f'{index}. <a href="{escape(article.url)}">{escape(article.title)}</a>'
+            )
+            sections.append(f"   {escape(article.source)} · {published}")
+        sections.append("")
+    else:
+        sections.extend(["Chưa có tin thị trường mới trong cửa sổ theo dõi.", ""])
 
     return "\n".join(sections)
 

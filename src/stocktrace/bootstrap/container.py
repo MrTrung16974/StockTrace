@@ -33,9 +33,11 @@ from stocktrace.application.services.market_data import MarketDataService
 from stocktrace.application.services.stock_analysis_service import StockAnalysisService
 from stocktrace.application.services.trace import OfficialTraceIngestionService, TraceService
 from stocktrace.application.services.trace.trace_service import TraceRepository
+from stocktrace.application.services.portfolio import PortfolioService
 from stocktrace.application.services.watchlist import WatchlistService
 from stocktrace.domain.ports.ai_cache import AICache
 from stocktrace.domain.ports.market_data_cache import MarketDataCache
+from stocktrace.domain.repositories.portfolio import PortfolioRepository
 from stocktrace.domain.repositories.watchlist import WatchlistRepository
 from stocktrace.infrastructure.ai.provider_factory import create_llm_provider
 from stocktrace.infrastructure.cache.memory import InMemoryMarketDataCache
@@ -47,6 +49,7 @@ from stocktrace.infrastructure.config.settings import Environment
 from stocktrace.infrastructure.db.repositories import (
     SqlAlchemyFinancialDashboardSnapshotRepository,
     SqlAlchemyTraceRepository,
+    SqlAlchemyPortfolioRepository,
     SqlAlchemyWatchlistRepository,
 )
 from stocktrace.infrastructure.db.session import SessionManager
@@ -168,6 +171,10 @@ class Container:
     def watchlist_service(self) -> WatchlistService:
         """Build the watchlist service."""
         return WatchlistService(repository_context_factory=self._watchlist_repository)
+
+    def portfolio_service(self) -> PortfolioService:
+        """Build the portfolio service."""
+        return PortfolioService(repository_context_factory=self._portfolio_repository)
 
     def trace_service(self) -> TraceService:
         """Build the trace engine service."""
@@ -358,6 +365,11 @@ class Container:
     async def _watchlist_repository(self) -> AsyncIterator[WatchlistRepository]:
         async with self._session_manager.session() as session:
             yield SqlAlchemyWatchlistRepository(session=session)
+
+    @asynccontextmanager
+    async def _portfolio_repository(self) -> AsyncIterator[PortfolioRepository]:
+        async with self._session_manager.session() as session:
+            yield SqlAlchemyPortfolioRepository(session=session)
 
     @asynccontextmanager
     async def _trace_repository(self) -> AsyncIterator[TraceRepository]:

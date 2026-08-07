@@ -39,6 +39,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.telegram_runner = TelegramBotRunner(
         settings=settings,
         watchlist_service=container.watchlist_service(),
+        portfolio_service=container.portfolio_service(),
         market_data_service=container.market_data_service(),
         stock_analysis_service=container.stock_analysis_service(),
         market_analysis_service=container.market_analysis_service(),

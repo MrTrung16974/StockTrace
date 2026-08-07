@@ -25,6 +25,7 @@ from stocktrace.application.services.news_quality import (
     is_recognized_financial_source,
     select_recent_unique_news,
 )
+from stocktrace.application.services.portfolio import PortfolioService
 from stocktrace.application.services.stock_analysis_service import StockAnalysisService
 from stocktrace.application.services.trace import TraceService
 from stocktrace.application.services.trace.ingestion_service import OfficialTraceIngestionService
@@ -51,6 +52,9 @@ from stocktrace.infrastructure.telegram.messages import (
     build_help_message,
     build_market_message,
     build_news_message,
+    build_portfolio_message,
+    build_portfolio_added_message,
+    build_portfolio_removed_message,
     build_price_message,
     build_removed_message,
     build_start_message,
@@ -286,6 +290,7 @@ def _build_financial_command_response(
 def create_router(  # noqa: PLR0915
     settings: Settings,
     watchlist_service: WatchlistService,
+    portfolio_service: PortfolioService,
     market_data_service: MarketDataService,
     stock_analysis_service: StockAnalysisService | None = None,
     market_analysis_service: MarketAnalysisService | None = None,
@@ -376,6 +381,71 @@ def create_router(  # noqa: PLR0915
 
         items = await watchlist_service.list_symbols(owner_id=owner_id)
         await message.answer(build_watchlist_message(items))
+
+    @router.message(Command("padd"))
+    async def padd(message: Message, command: CommandObject) -> None:
+        if not is_authorized_user(message.from_user, settings.telegram):
+            await reject_unauthorized(message)
+            return
+        owner_id = _watchlist_owner_id(message)
+        if owner_id is None:
+            await reject_unauthorized(message)
+            return
+
+        args = (command.args or "").split()
+        if len(args) < 3:
+            await message.answer("Sử dụng: /padd <MÃ> <SỐ LƯỢNG> <GIÁ VỐN>")
+            return
+
+        try:
+            quantity = int(args[1])
+            price = Decimal(args[2])
+            item = await portfolio_service.add_position(
+                owner_id=owner_id,
+                raw_symbol=args[0],
+                quantity=quantity,
+                average_price=price,
+            )
+        except (ValueError, InvalidSymbolError):
+            await message.answer("Đầu vào không hợp lệ. Số lượng phải là số nguyên, giá là số.")
+            return
+
+        await message.answer(build_portfolio_added_message(item.symbol, item.quantity, item.average_price))
+
+    @router.message(Command("prm"))
+    async def prm(message: Message, command: CommandObject) -> None:
+        if not is_authorized_user(message.from_user, settings.telegram):
+            await reject_unauthorized(message)
+            return
+        owner_id = _watchlist_owner_id(message)
+        if owner_id is None:
+            await reject_unauthorized(message)
+            return
+
+        try:
+            removed = await portfolio_service.remove_position(
+                owner_id=owner_id,
+                raw_symbol=command.args,
+            )
+        except InvalidSymbolError as exc:
+            await message.answer(str(exc))
+            return
+
+        symbol = command.args.strip().upper() if command.args else ""
+        await message.answer(build_portfolio_removed_message(symbol=symbol, removed=removed))
+
+    @router.message(Command("portfolio"))
+    async def portfolio(message: Message) -> None:
+        if not is_authorized_user(message.from_user, settings.telegram):
+            await reject_unauthorized(message)
+            return
+        owner_id = _watchlist_owner_id(message)
+        if owner_id is None:
+            await reject_unauthorized(message)
+            return
+
+        items = await portfolio_service.list_positions(owner_id=owner_id)
+        await message.answer(build_portfolio_message(items))
 
     @router.message(Command("price"))
     async def price(message: Message, command: CommandObject) -> None:

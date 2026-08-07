@@ -25,6 +25,7 @@ from stocktrace.application.services.market_data import MarketDataService
 from stocktrace.application.services.stock_analysis_service import StockAnalysisService
 from stocktrace.application.services.trace import TraceService
 from stocktrace.application.services.trace.ingestion_service import OfficialTraceIngestionService
+from stocktrace.application.services.portfolio import PortfolioService
 from stocktrace.application.services.watchlist import WatchlistService
 from stocktrace.infrastructure.config import Settings
 from stocktrace.infrastructure.logging.config import get_logger
@@ -40,6 +41,7 @@ class TelegramBotRunner:
         self,
         settings: Settings,
         watchlist_service: WatchlistService,
+        portfolio_service: PortfolioService,
         market_data_service: MarketDataService,
         stock_analysis_service: StockAnalysisService | None = None,
         market_analysis_service: MarketAnalysisService | None = None,
@@ -53,6 +55,7 @@ class TelegramBotRunner:
     ) -> None:
         self._settings = settings
         self._watchlist_service = watchlist_service
+        self._portfolio_service = portfolio_service
         self._market_data_service = market_data_service
         self._stock_analysis_service = stock_analysis_service
         self._market_analysis_service = market_analysis_service
@@ -118,6 +121,7 @@ class TelegramBotRunner:
             create_router(
                 settings=self._settings,
                 watchlist_service=self._watchlist_service,
+                portfolio_service=self._portfolio_service,
                 market_data_service=self._market_data_service,
                 stock_analysis_service=self._stock_analysis_service,
                 market_analysis_service=self._market_analysis_service,
@@ -159,15 +163,21 @@ class TelegramBotRunner:
         if self._bot is None or self._dispatcher is None:
             return
 
-        try:
-            await self._bot.delete_webhook(
-                drop_pending_updates=self._settings.telegram.drop_pending_updates,
-            )
-            await self._dispatcher.start_polling(
-                self._bot,
-                allowed_updates=self._dispatcher.resolve_used_update_types(),
-            )
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:
-            self._logger.error("telegram_polling_failed", error=str(exc))
+        backoff = 5
+        while self._bot is not None and self._dispatcher is not None:
+            try:
+                await self._bot.delete_webhook(
+                    drop_pending_updates=self._settings.telegram.drop_pending_updates,
+                )
+                backoff = 5  # reset backoff after initial connection success
+                await self._dispatcher.start_polling(
+                    self._bot,
+                    allowed_updates=self._dispatcher.resolve_used_update_types(),
+                )
+                break  # polling stopped normally
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                self._logger.error("telegram_polling_error", error=str(exc), next_retry=backoff)
+                await asyncio.sleep(backoff)
+                backoff = min(backoff * 2, 60)
