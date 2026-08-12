@@ -73,8 +73,13 @@ class MarketAnalysisService:
         """Return whether AI analysis is available."""
         return self._analysis_service.is_configured
 
-    async def analyze_market(self, news_limit: int = 10) -> MarketAnalysisBundle:
-        """Fetch market data and run AI analysis."""
+    async def analyze_market(
+        self,
+        news_limit: int = 10,
+        *,
+        use_ai: bool = False,
+    ) -> MarketAnalysisBundle:
+        """Fetch market data; call AI only for an explicit analysis request."""
         self._logger.info("market_analysis_started")
 
         # 1. Fetch indices and sectors first
@@ -113,7 +118,7 @@ class MarketAnalysisService:
         # 3. One Gemini request with the complete market snapshot and fetched news.
         analysis: MarketAnalysisResult | None = None
         ai_status = "disabled"
-        if self.is_enabled:
+        if use_ai and self.is_enabled:
             try:
                 context = MarketAnalysisContext(
                     indices=indices,
@@ -126,6 +131,8 @@ class MarketAnalysisService:
             except Exception as exc:
                 self._logger.warning("market_ai_analysis_failed", error=str(exc))
                 ai_status = "unavailable"
+        elif use_ai:
+            ai_status = "unavailable"
 
         bundle = MarketAnalysisBundle(
             timestamp=datetime.now(UTC),

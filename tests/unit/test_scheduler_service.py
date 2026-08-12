@@ -256,7 +256,7 @@ async def test_scheduler_registers_daily_financial_report_at_9am() -> None:
 
 
 @pytest.mark.asyncio
-async def test_scheduler_registers_ai_reports_only_when_enabled() -> None:
+async def test_scheduler_never_registers_ai_reports() -> None:
     scheduler = AsyncIOScheduler(timezone=ZoneInfo("Asia/Ho_Chi_Minh"))
     settings = _settings()
     service = SchedulerService(
@@ -286,8 +286,8 @@ async def test_scheduler_registers_ai_reports_only_when_enabled() -> None:
     )
 
     enabled_service.start()
-    assert enabled_scheduler.get_job("stocktrace-ai-morning-report") is not None
-    assert enabled_scheduler.get_job("stocktrace-ai-evening-report") is not None
+    assert enabled_scheduler.get_job("stocktrace-ai-morning-report") is None
+    assert enabled_scheduler.get_job("stocktrace-ai-evening-report") is None
     await enabled_service.shutdown()
 
 

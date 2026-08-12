@@ -50,14 +50,13 @@ from stocktrace.infrastructure.logging.config import get_logger
 from stocktrace.infrastructure.telegram.authorization import is_authorized_user, reject_unauthorized
 from stocktrace.infrastructure.telegram.delivery import deliver_html_messages
 from stocktrace.infrastructure.telegram.messages import (
-    append_ai_news_section,
     build_added_message,
     build_full_analysis_message,
     build_help_message,
     build_market_message,
     build_news_message,
-    build_portfolio_message,
     build_portfolio_added_message,
+    build_portfolio_message,
     build_portfolio_removed_message,
     build_price_message,
     build_removed_message,
@@ -498,23 +497,16 @@ def create_router(  # noqa: PLR0915
 
         try:
             recognized_sources_only = getattr(command, "command", "") == "new"
-            if stock_analysis_service is not None and stock_analysis_service.is_enabled:
-                articles, analysis = await stock_analysis_service.fetch_and_analyze_news(
+            if news_query_handler is not None:
+                articles = await news_query_handler.handle(
+                    GetNewsQuery(symbol=symbol, limit=_DEFAULT_NEWS_LIMIT),
+                )
+            else:
+                articles = await market_data_service.get_news(
                     symbol,
                     limit=_DEFAULT_NEWS_LIMIT,
                 )
-            else:
-                if news_query_handler is not None:
-                    articles = await news_query_handler.handle(
-                        GetNewsQuery(symbol=symbol, limit=_DEFAULT_NEWS_LIMIT),
-                    )
-                else:
-                    articles = await market_data_service.get_news(
-                        symbol,
-                        limit=_DEFAULT_NEWS_LIMIT,
-                    )
-                articles = select_recent_unique_news(articles, limit=_DEFAULT_NEWS_LIMIT)
-                analysis = None
+            articles = select_recent_unique_news(articles, limit=_DEFAULT_NEWS_LIMIT)
 
             if recognized_sources_only:
                 articles = [
@@ -539,8 +531,6 @@ def create_router(  # noqa: PLR0915
             articles=articles,
             recognized_sources_only=recognized_sources_only,
         )
-        if analysis is not None:
-            response = append_ai_news_section(response, analysis)
         await message.answer(response)
 
     @router.message(Command("analysis"))
@@ -608,7 +598,10 @@ def create_router(  # noqa: PLR0915
 
         thinking = await message.answer("⏳ Đang phân tích thị trường...")
         try:
-            bundle = await market_analysis_service.analyze_market(news_limit=_DEFAULT_NEWS_LIMIT)
+            bundle = await market_analysis_service.analyze_market(
+                news_limit=_DEFAULT_NEWS_LIMIT,
+                use_ai=True,
+            )
         except Exception as exc:
             logger.error("market_analysis_failed", error=str(exc))
             await thinking.edit_text("Không thể phân tích thị trường. Vui lòng thử lại sau.")
@@ -654,7 +647,7 @@ def create_router(  # noqa: PLR0915
             f"⏳ Đang phân tích tài chính <b>{symbol}</b> ({period.label})...",
         )
         try:
-            dashboard = await financial_analysis_service.analyze(symbol, period)
+            dashboard = await financial_analysis_service.analyze(symbol, period, use_ai=True)
         except FinancialProviderUnavailableError:
             snapshot = (
                 await financial_snapshot_service.get_latest(symbol, period.label)
@@ -772,7 +765,12 @@ def create_router(  # noqa: PLR0915
             f"⏳ So sánh tài chính <b>{symbol_a}</b> vs <b>{symbol_b}</b>...",
         )
         try:
-            result = await financial_analysis_service.compare(symbol_a, symbol_b, period)
+            result = await financial_analysis_service.compare(
+                symbol_a,
+                symbol_b,
+                period,
+                use_ai=True,
+            )
         except FinancialProviderUnavailableError:
             await thinking.edit_text(
                 "Nguồn dữ liệu tài chính hiện không phản hồi. Vui lòng thử lại sau.",

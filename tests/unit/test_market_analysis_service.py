@@ -91,7 +91,7 @@ async def test_market_analysis_service_success(
         vietnam_index_provider=mock_vietnam_index_provider,
     )
 
-    bundle = await service.analyze_market(news_limit=2)
+    bundle = await service.analyze_market(news_limit=2, use_ai=True)
 
     assert bundle.indices is not None
     assert bundle.sectors is not None
@@ -125,6 +125,23 @@ async def test_market_analysis_service_ai_disabled(mock_market_data_service, moc
 
 
 @pytest.mark.asyncio
+async def test_market_analysis_requires_explicit_ai_request(
+    mock_market_data_service,
+    mock_analysis_service,
+) -> None:
+    service = MarketAnalysisService(
+        analysis_service=mock_analysis_service,
+        market_data_service=mock_market_data_service,
+    )
+
+    bundle = await service.analyze_market()
+
+    assert bundle.analysis is None
+    assert bundle.ai_status == "disabled"
+    mock_analysis_service.analyze_market.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_market_analysis_keeps_report_when_news_provider_is_unavailable(
     mock_market_data_service,
     mock_analysis_service,
@@ -135,7 +152,7 @@ async def test_market_analysis_keeps_report_when_news_provider_is_unavailable(
         market_data_service=mock_market_data_service,
     )
 
-    bundle = await service.analyze_market()
+    bundle = await service.analyze_market(use_ai=True)
 
     assert bundle.news == ()
     assert bundle.news_error == "Nguồn tin thị trường hiện không phản hồi."

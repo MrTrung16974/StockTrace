@@ -77,6 +77,8 @@ class FinancialAnalysisService:
         self,
         raw_symbol: str,
         period: FinancialPeriod,
+        *,
+        use_ai: bool = False,
     ) -> FinancialDashboard:
         """Run full financial analysis and return visual dashboard."""
         symbol = normalize_symbol(raw_symbol)
@@ -145,7 +147,7 @@ class FinancialAnalysisService:
             signals=signals,
         )
 
-        if self._ai is not None:
+        if use_ai and self._ai is not None:
             ai_result = await self._ai.analyze(analysis)
             analysis = FinancialAnalysis(
                 symbol=analysis.symbol,
@@ -171,10 +173,12 @@ class FinancialAnalysisService:
         raw_symbol_a: str,
         raw_symbol_b: str,
         period: FinancialPeriod,
+        *,
+        use_ai: bool = False,
     ) -> FinancialCompareResult:
         """Compare financial health of two symbols."""
-        dash_a = await self.analyze(raw_symbol_a, period)
-        dash_b = await self.analyze(raw_symbol_b, period)
+        dash_a = await self.analyze(raw_symbol_a, period, use_ai=use_ai)
+        dash_b = await self.analyze(raw_symbol_b, period, use_ai=use_ai)
 
         score_a = dash_a.analysis.score.overall_score
         score_b = dash_b.analysis.score.overall_score

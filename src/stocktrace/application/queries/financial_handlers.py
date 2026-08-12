@@ -25,7 +25,7 @@ class GetFinancialAnalysisQueryHandler:
 
     async def handle(self, query: GetFinancialAnalysisQuery) -> FinancialDashboard:
         period = FinancialPeriod.parse(query.period)
-        return await self._service.analyze(query.symbol, period)
+        return await self._service.analyze(query.symbol, period, use_ai=True)
 
 
 class GetFinancialReportQueryHandler:
@@ -36,7 +36,7 @@ class GetFinancialReportQueryHandler:
 
     async def handle(self, query: GetFinancialReportQuery) -> FinancialDashboard:
         period = FinancialPeriod.parse("1Y")
-        return await self._service.analyze(query.symbol, period)
+        return await self._service.analyze(query.symbol, period, use_ai=True)
 
 
 class GetValuationQueryHandler:
@@ -47,7 +47,7 @@ class GetValuationQueryHandler:
 
     async def handle(self, query: GetValuationQuery) -> FinancialDashboard:
         period = FinancialPeriod.parse("1Y")
-        return await self._service.analyze(query.symbol, period)
+        return await self._service.analyze(query.symbol, period, use_ai=True)
 
 
 class GetFinancialScoreQueryHandler:
@@ -58,7 +58,7 @@ class GetFinancialScoreQueryHandler:
 
     async def handle(self, query: GetFinancialScoreQuery) -> FinancialDashboard:
         period = FinancialPeriod.parse(query.period)
-        return await self._service.analyze(query.symbol, period)
+        return await self._service.analyze(query.symbol, period, use_ai=True)
 
 
 class CompareFinancialQueryHandler:
@@ -69,4 +69,9 @@ class CompareFinancialQueryHandler:
 
     async def handle(self, query: CompareFinancialQuery) -> FinancialCompareResult:
         period = FinancialPeriod.parse(query.period)
-        return await self._service.compare(query.symbol_a, query.symbol_b, period)
+        return await self._service.compare(
+            query.symbol_a,
+            query.symbol_b,
+            period,
+            use_ai=True,
+        )

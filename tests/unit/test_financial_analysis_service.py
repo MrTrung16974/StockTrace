@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from unittest.mock import AsyncMock
+
 import pytest
 from pydantic import SecretStr
-from unittest.mock import AsyncMock
 
 from stocktrace.application.services.financial.ai_financial_analysis_service import (
     AIFinancialAnalysisService,
@@ -14,8 +15,8 @@ from stocktrace.application.services.financial.financial_analysis_service import
 )
 from stocktrace.domain.ports.financial_provider import FinancialDataNotFoundError
 from stocktrace.domain.value_objects.financial_period import FinancialPeriod
-from stocktrace.infrastructure.providers.financial.mock_provider import MockFinancialProvider
 from stocktrace.infrastructure.config.settings import AISettings
+from stocktrace.infrastructure.providers.financial.mock_provider import MockFinancialProvider
 
 _EXPECTED_CHART_COUNT = 5
 
@@ -98,3 +99,17 @@ async def test_financial_ai_falls_back_when_llm_request_fails(
     assert result is not None
     assert result.symbol == "FPT"
     assert result.raw_response == ""
+
+
+@pytest.mark.asyncio
+async def test_financial_ai_requires_explicit_request() -> None:
+    ai_service = AsyncMock()
+    service = FinancialAnalysisService(
+        financial_provider=MockFinancialProvider(),
+        ai_service=ai_service,
+    )
+    period = FinancialPeriod.parse("1Y")
+
+    await service.analyze("FPT", period)
+
+    ai_service.analyze.assert_not_awaited()

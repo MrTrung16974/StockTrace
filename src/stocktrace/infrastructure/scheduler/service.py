@@ -136,33 +136,9 @@ class SchedulerService:
                 coalesce=True,
             )
             has_job = True
-        if self._stock_analysis_job is not None and self._settings.scheduler.analysis_enabled:
-            self._scheduler.add_job(
-                self._stock_analysis_job.run_morning_report,
-                CronTrigger(
-                    hour=self._settings.scheduler.morning_report_hour,
-                    minute=0,
-                    timezone=self._timezone,
-                ),
-                id="stocktrace-ai-morning-report",
-                replace_existing=True,
-                max_instances=1,
-                coalesce=True,
-            )
-            self._scheduler.add_job(
-                self._stock_analysis_job.run_evening_report,
-                CronTrigger(
-                    hour=self._settings.scheduler.evening_report_hour,
-                    minute=0,
-                    timezone=self._timezone,
-                ),
-                id="stocktrace-ai-evening-report",
-                replace_existing=True,
-                max_instances=1,
-                coalesce=True,
-            )
-            has_job = True
-
+        # LLM-backed stock reports are deliberately never registered. The daily
+        # market snapshot remains data-only because MarketAnalysisService defaults
+        # to use_ai=False. AI may only run from an explicit analysis request.
         if self._market_analysis_job is not None:
             self._scheduler.add_job(
                 self._market_analysis_job.run_daily_report,

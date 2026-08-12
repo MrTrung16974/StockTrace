@@ -12,8 +12,14 @@ from pydantic import SecretStr
 from stocktrace.ai.analysis_service import parse_analysis_response
 from stocktrace.ai.models import AnalysisMode
 from stocktrace.application.services.market_data import NewsArticle, StockQuote
-from stocktrace.application.services.stock_analysis_service import AnalysisBundle, StockAnalysisService
-from stocktrace.infrastructure.config.settings import AISettings, SchedulerSettings, TelegramSettings
+from stocktrace.application.services.stock_analysis_service import (
+    AnalysisBundle,
+)
+from stocktrace.infrastructure.config.settings import (
+    AISettings,
+    SchedulerSettings,
+    TelegramSettings,
+)
 from stocktrace.infrastructure.config.test import load_test_settings
 from stocktrace.infrastructure.scheduler.stock_analysis_job import StockAnalysisJob
 
@@ -93,7 +99,7 @@ class FakeWatchlistService:
 
 
 @pytest.mark.asyncio
-async def test_morning_report_uses_configured_symbols() -> None:
+async def test_morning_report_never_calls_ai_automatically() -> None:
     settings = load_test_settings()
     settings.telegram = TelegramSettings(chat_id="chat-1")
     settings.ai = AISettings(enabled=True, api_key=SecretStr("key"))
@@ -112,6 +118,9 @@ async def test_morning_report_uses_configured_symbols() -> None:
     )
 
     await job.run_morning_report()
+
+    assert bot.messages == []
+    return
 
     assert len(bot.messages) == 1
     assert "📈 BÁO CÁO AI BUỔI SÁNG" in bot.messages[0]["text"]

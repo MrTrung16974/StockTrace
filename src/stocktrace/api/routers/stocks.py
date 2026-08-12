@@ -89,9 +89,8 @@ async def get_news(
     ticker: str,
     container: Annotated[Container, Depends(get_request_container)],
     limit: Annotated[int, Query(ge=1, le=20)] = 5,
-    ai: Annotated[bool, Query(description="Include Gemini AI insights")] = True,
 ) -> StockNewsResponse:
-    """Return the latest news articles for a ticker with optional Gemini analysis."""
+    """Return latest articles without invoking AI."""
     try:
         articles = await _news_handler(container).handle(
             GetNewsQuery(symbol=ticker, limit=limit)
@@ -111,19 +110,6 @@ async def get_news(
     ai_overview: str | None = None
     ai_short_term: str | None = None
     ai_risks: str | None = None
-
-    if ai and articles:
-        svc = _analysis_service(container)
-        if svc.is_enabled:
-            try:
-                analysis = await svc.analyze_news(normalized, list(articles))
-                if analysis:
-                    ai_sentiment = analysis.sentiment.value
-                    ai_overview = analysis.overview
-                    ai_short_term = analysis.short_term
-                    ai_risks = analysis.risks
-            except Exception:
-                pass  # AI failure must never break the news endpoint
 
     return StockNewsResponse(
         ticker=normalized,

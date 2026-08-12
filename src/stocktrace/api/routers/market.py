@@ -49,7 +49,7 @@ async def get_market_analysis(
     """
     svc = _market_service(container)
     try:
-        bundle = await svc.analyze_market(news_limit=news_limit)
+        bundle = await svc.analyze_market(news_limit=news_limit, use_ai=True)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Market analysis failed: {exc}") from exc
 

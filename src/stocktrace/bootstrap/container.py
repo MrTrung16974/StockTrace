@@ -30,10 +30,10 @@ from stocktrace.application.services.financial.snapshot_service import Financial
 from stocktrace.application.services.health import HealthCheckService
 from stocktrace.application.services.market_analysis_service import MarketAnalysisService
 from stocktrace.application.services.market_data import MarketDataService
+from stocktrace.application.services.portfolio import PortfolioService
 from stocktrace.application.services.stock_analysis_service import StockAnalysisService
 from stocktrace.application.services.trace import OfficialTraceIngestionService, TraceService
 from stocktrace.application.services.trace.trace_service import TraceRepository
-from stocktrace.application.services.portfolio import PortfolioService
 from stocktrace.application.services.watchlist import WatchlistService
 from stocktrace.domain.ports.ai_cache import AICache
 from stocktrace.domain.ports.market_data_cache import MarketDataCache
@@ -48,8 +48,8 @@ from stocktrace.infrastructure.config import Settings, get_settings
 from stocktrace.infrastructure.config.settings import Environment
 from stocktrace.infrastructure.db.repositories import (
     SqlAlchemyFinancialDashboardSnapshotRepository,
-    SqlAlchemyTraceRepository,
     SqlAlchemyPortfolioRepository,
+    SqlAlchemyTraceRepository,
     SqlAlchemyWatchlistRepository,
 )
 from stocktrace.infrastructure.db.session import SessionManager
@@ -356,7 +356,6 @@ class Container:
             watchlist_service=self.watchlist_service(),
             bot=bot,
             settings=self._settings,
-            stock_analysis_job=self.stock_analysis_job(bot),
             market_analysis_job=self.market_analysis_job(bot),
             financial_analysis_job=self.financial_analysis_job(bot),
             trace_ingestion_job=self.trace_ingestion_job(),
