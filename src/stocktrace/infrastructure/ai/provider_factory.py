@@ -13,6 +13,6 @@ def create_llm_provider(settings: AISettings) -> LLMProvider:
     The application exclusively uses Google Gemini for all AI features.
     Configure the model and API key via environment variables:
         STOCKTRACE_AI__API_KEY=<your-gemini-api-key>
-        STOCKTRACE_AI__MODEL=gemini-2.0-flash          (default)
+        STOCKTRACE_AI__MODEL=gemini-3.6-flash          (default)
     """
     return GeminiProvider(settings)

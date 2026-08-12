@@ -70,9 +70,21 @@ class AISettings(BaseModel):
     # Always "gemini" — kept as a field for forward compatibility
     provider: str = "gemini"
     api_key: SecretStr | None = None
-    # Default model: gemini-2.0-flash (fast, cost-efficient, supports long context)
-    # Alternatives: gemini-2.0-flash-thinking-exp, gemini-1.5-pro, gemini-1.5-flash
-    model: str = "gemini-2.0-flash"
+    # Stable fast model; older 2.0 aliases have been retired by Gemini.
+    model: str = "gemini-3.6-flash"
+    # Backward-compatible first fallback, primarily for old deployments.
+    fallback_model: str | None = "gemini-3.5-flash"
+    # Extra alternatives used only when Gemini reports model retirement or quota exhaustion.
+    fallback_models: list[str] = Field(
+        default_factory=lambda: [
+            "gemini-3.5-flash-lite",
+            "gemini-3.1-flash-lite",
+            "gemini-3.1-pro-preview",
+            "gemini-2.5-flash",
+            "gemini-2.5-flash-lite",
+            "gemini-2.5-pro",
+        ],
+    )
     max_tokens: int = Field(default=2048, ge=256, le=8192)
     temperature: float = Field(default=0.3, ge=0, le=2)
     request_timeout_seconds: float = Field(default=60.0, gt=0)
@@ -80,6 +92,14 @@ class AISettings(BaseModel):
     market_cache_ttl_seconds: int = Field(default=1800, ge=60)
     report_cache_ttl_seconds: int = Field(default=300, ge=60)
     translate_news: bool = True
+
+    @field_validator("fallback_models", mode="before")
+    @classmethod
+    def parse_fallback_models(cls, value: object) -> object:
+        """Allow a comma-separated model chain in environment configuration."""
+        if isinstance(value, str):
+            return [model.strip() for model in value.split(",") if model.strip()]
+        return value
 
     @property
     def has_api_key(self) -> bool:
