@@ -55,6 +55,19 @@ def test_scheduler_symbol_lists_accept_comma_separated_environment_values(
     assert settings.scheduler.analysis_symbols == ["HPG", "FPT"]
 
 
+def test_ai_fallback_models_accept_comma_separated_environment_values(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(
+        "STOCKTRACE_AI__FALLBACK_MODELS",
+        "gemini-3.5-flash-lite,gemini-2.5-flash",
+    )
+
+    settings = Settings(_env_file=None)
+
+    assert settings.ai.fallback_models == ["gemini-3.5-flash-lite", "gemini-2.5-flash"]
+
+
 def test_prod_settings_load_with_required_secrets() -> None:
     settings = Settings(
         _env_file=None,

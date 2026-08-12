@@ -75,7 +75,7 @@ class AISettings(BaseModel):
     # Backward-compatible first fallback, primarily for old deployments.
     fallback_model: str | None = "gemini-3.5-flash"
     # Extra alternatives used only when Gemini reports model retirement or quota exhaustion.
-    fallback_models: list[str] = Field(
+    fallback_models: Annotated[list[str], NoDecode] = Field(
         default_factory=lambda: [
             "gemini-3.5-flash-lite",
             "gemini-3.1-flash-lite",
