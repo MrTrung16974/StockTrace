@@ -159,7 +159,12 @@ def build_market_analysis_report(bundle: MarketAnalysisBundle) -> str:
             "",
         ])
     else:
-        sections.extend([_DIVIDER, "", "Không có phân tích AI.", ""])
+        ai_message = (
+            "Phân tích AI đang tắt."
+            if bundle.ai_status == "disabled"
+            else "Phân tích AI tạm không khả dụng; dữ liệu thị trường vẫn được hiển thị."
+        )
+        sections.extend([_DIVIDER, "", ai_message, ""])
 
     sections.extend([_DIVIDER, "", "📰 <b>TIN THỊ TRƯỜNG MỚI NHẤT (GOOGLE NEWS)</b>", ""])
     if bundle.news:
@@ -175,7 +180,11 @@ def build_market_analysis_report(bundle: MarketAnalysisBundle) -> str:
             sections.append(f"   {escape(article.source)} · {published}")
         sections.append("")
     else:
-        sections.extend(["Chưa có tin thị trường mới trong cửa sổ theo dõi.", ""])
+        if bundle.news_error:
+            sections.append(escape(bundle.news_error))
+        else:
+            sections.append("Chưa có tin thị trường mới trong cửa sổ theo dõi.")
+        sections.append("")
 
     return "\n".join(sections)
 

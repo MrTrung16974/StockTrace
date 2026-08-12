@@ -14,6 +14,9 @@ from stocktrace.domain.entities.financial import (
 )
 from stocktrace.domain.ports.llm_provider import LLMProvider
 from stocktrace.infrastructure.config.settings import AISettings
+from stocktrace.infrastructure.logging.config import get_logger
+
+logger = get_logger(__name__)
 
 
 def _parse_recommendation(text: str) -> Recommendation:
@@ -146,7 +149,11 @@ class AIFinancialAnalysisService:
             temperature=self._settings.temperature if self._settings else 0.3,
         )
 
-        response = await self._llm.complete(request)
+        try:
+            response = await self._llm.complete(request)
+        except Exception as exc:
+            logger.warning("financial_ai_fallback", symbol=financial_analysis.symbol, error=str(exc))
+            return self._fallback_analysis(financial_analysis)
         parsed = self._parse_response(response.content)
 
         return AIFinancialAnalysis(

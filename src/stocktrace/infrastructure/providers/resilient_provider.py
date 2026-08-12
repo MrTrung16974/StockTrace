@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 import tenacity
@@ -61,26 +62,30 @@ class ResilientQuoteProvider:
 
     async def get_quote(self, symbol: str) -> StockQuote:
         """Fetch a quote with full resilience protection."""
-        return await self._call(self._inner.get_quote(symbol), f"get_quote({symbol})")  # type: ignore[return-value]
+        return await self._call(lambda: self._inner.get_quote(symbol), f"get_quote({symbol})")  # type: ignore[return-value]
 
     async def get_historical_prices(self, symbol: str, days: int = 365) -> list[HistoricalPrice]:
         """Fetch historical prices with full resilience protection."""
         return await self._call(  # type: ignore[return-value]
-            self._inner.get_historical_prices(symbol, days),
+            lambda: self._inner.get_historical_prices(symbol, days),
             f"get_historical_prices({symbol})",
         )
 
     async def get_fundamental_data(self, symbol: str) -> FundamentalData:
         """Fetch fundamental data with full resilience protection."""
         return await self._call(  # type: ignore[return-value]
-            self._inner.get_fundamental_data(symbol),
+            lambda: self._inner.get_fundamental_data(symbol),
             f"get_fundamental_data({symbol})",
         )
 
-    async def _call(self, coro: Any, label: str) -> Any:
-        """Apply bulkhead → circuit breaker → timeout to an awaitable."""
+    async def _call(self, factory: Callable[[], Awaitable[Any]], label: str) -> Any:
+        """Apply bulkhead → circuit breaker → retry → timeout to a fresh awaitable."""
         async with self._semaphore:
-            return await self._cb.call(self._with_timeout(coro, label))
+            @self._retry
+            async def call_once() -> Any:
+                return await self._cb.call(self._with_timeout(factory(), label))
+
+            return await call_once()
 
     async def _with_timeout(self, coro: Any, label: str) -> Any:
         """Wrap a coroutine with asyncio timeout and translate errors."""

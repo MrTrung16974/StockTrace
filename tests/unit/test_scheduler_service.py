@@ -26,6 +26,8 @@ from stocktrace.infrastructure.scheduler.financial_job import FinancialAnalysisJ
 from stocktrace.infrastructure.scheduler.service import SchedulerService
 
 PRICE_INTERVAL_MINUTES = 1
+PRICE_CHANGE_THRESHOLD_PERCENT = Decimal("0.1")
+PRICE_ALERT_COOLDOWN_MINUTES = 5
 NEWS_DIGEST_HOURS = [8, 12, 16, 20]
 FINANCIAL_DAILY_REPORT_HOUR = 9
 TWO_ITEMS = 2
@@ -103,6 +105,30 @@ class FakeQuoteHandler:
         )
 
 
+class SequentialQuoteHandler:
+    """Quote handler double that returns one configured price per poll."""
+
+    def __init__(self, prices: list[Decimal]) -> None:
+        self._prices = iter(prices)
+
+    async def handle(self, query: GetPriceQuery) -> StockQuote:
+        price = next(self._prices)
+        return StockQuote(
+            ticker=query.symbol,
+            company_name=f"{query.symbol} Corp",
+            current_price=price,
+            change=Decimal("0"),
+            change_percent=Decimal("0"),
+            open_price=price,
+            high_price=price,
+            low_price=price,
+            volume=1,
+            timestamp=datetime.now(tz=UTC),
+            currency="VND",
+            source="test",
+        )
+
+
 class FakeWatchlistService:
     """Watchlist service test double."""
 
@@ -143,6 +169,16 @@ class FakeTraceIngestionJob:
     """Trace ingestion double used to verify scheduler registration."""
 
     async def run(self) -> None:
+        return None
+
+
+class FakeStockAnalysisJob:
+    """Stock analysis job double used to verify feature-flagged registration."""
+
+    async def run_morning_report(self) -> None:
+        return None
+
+    async def run_evening_report(self) -> None:
         return None
 
 
@@ -190,6 +226,8 @@ def test_scheduler_settings_defaults_match_expected_schedule() -> None:
     assert settings.price_enabled is True
     assert settings.news_enabled is True
     assert settings.price_alert_interval_minutes == PRICE_INTERVAL_MINUTES
+    assert settings.price_change_threshold_percent == PRICE_CHANGE_THRESHOLD_PERCENT
+    assert settings.price_alert_cooldown_minutes == PRICE_ALERT_COOLDOWN_MINUTES
     assert settings.news_digest_hours == NEWS_DIGEST_HOURS
     assert settings.financial_daily_report_enabled is True
     assert settings.financial_daily_report_hour == FINANCIAL_DAILY_REPORT_HOUR
@@ -215,6 +253,42 @@ async def test_scheduler_registers_daily_financial_report_at_9am() -> None:
     assert str(job.trigger).startswith("cron[hour='9', minute='0']")
 
     await service.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_scheduler_registers_ai_reports_only_when_enabled() -> None:
+    scheduler = AsyncIOScheduler(timezone=ZoneInfo("Asia/Ho_Chi_Minh"))
+    settings = _settings()
+    service = SchedulerService(
+        quote_handler=cast(Any, FakeQuoteHandler()),
+        news_handler=cast(Any, FakeNewsHandler()),
+        watchlist_service=cast(Any, FakeWatchlistService()),
+        bot=cast(Any, FakeBot()),
+        settings=settings,
+        scheduler=scheduler,
+        stock_analysis_job=cast(Any, FakeStockAnalysisJob()),
+    )
+
+    service.start()
+    assert scheduler.get_job("stocktrace-ai-morning-report") is None
+    await service.shutdown()
+
+    enabled_scheduler = AsyncIOScheduler(timezone=ZoneInfo("Asia/Ho_Chi_Minh"))
+    settings.scheduler.analysis_enabled = True
+    enabled_service = SchedulerService(
+        quote_handler=cast(Any, FakeQuoteHandler()),
+        news_handler=cast(Any, FakeNewsHandler()),
+        watchlist_service=cast(Any, FakeWatchlistService()),
+        bot=cast(Any, FakeBot()),
+        settings=settings,
+        scheduler=enabled_scheduler,
+        stock_analysis_job=cast(Any, FakeStockAnalysisJob()),
+    )
+
+    enabled_service.start()
+    assert enabled_scheduler.get_job("stocktrace-ai-morning-report") is not None
+    assert enabled_scheduler.get_job("stocktrace-ai-evening-report") is not None
+    await enabled_service.shutdown()
 
 
 @pytest.mark.asyncio
@@ -366,7 +440,7 @@ async def test_news_digest_does_not_resend_same_article_url() -> None:
 
 
 @pytest.mark.asyncio
-async def test_price_alert_sends_single_aggregated_message_and_continues_on_errors() -> None:
+async def test_price_alert_creates_baseline_and_continues_on_errors() -> None:
     bot = FakeBot()
     quote_handler = FakeQuoteHandler()
     service = SchedulerService(
@@ -384,18 +458,11 @@ async def test_price_alert_sends_single_aggregated_message_and_continues_on_erro
         await service.send_price_alert()
 
     assert [query.symbol for query in quote_handler.queries] == ["FPT", "VCB"]
-    assert len(bot.messages) == 1
-    message = bot.messages[0]
-    assert message["chat_id"] == "chat-1"
-    assert message["parse_mode"] == "HTML"
-    assert "Bảng giá" in message["text"]
-    assert "FPT" in message["text"]
-    assert "125,000" in message["text"]
-    assert "+1.21%" in message["text"]
+    assert bot.messages == []
 
 
 @pytest.mark.asyncio
-async def test_price_alert_sends_every_run_during_market_hours() -> None:
+async def test_price_alert_does_not_send_when_price_is_unchanged() -> None:
     bot = FakeBot()
     service = SchedulerService(
         quote_handler=cast(Any, FakeQuoteHandler()),
@@ -412,7 +479,64 @@ async def test_price_alert_sends_every_run_during_market_hours() -> None:
         await service.send_price_alert()
         await service.send_price_alert()
 
+    assert bot.messages == []
+
+
+@pytest.mark.asyncio
+async def test_price_alert_sends_when_change_reaches_threshold() -> None:
+    bot = FakeBot()
+    service = SchedulerService(
+        quote_handler=cast(Any, SequentialQuoteHandler([Decimal("100"), Decimal("100.1")])),
+        news_handler=cast(Any, FakeNewsHandler()),
+        watchlist_service=cast(Any, FakeWatchlistService(symbols=["FPT"])),
+        bot=cast(Any, bot),
+        settings=_settings(),
+    )
+
+    with patch("stocktrace.infrastructure.scheduler.service.datetime") as mock_datetime:
+        mock_datetime.now.return_value = MARKET_OPEN_TIME
+        await service.send_price_alert()
+        mock_datetime.now.return_value = MARKET_OPEN_TIME + timedelta(minutes=1)
+        await service.send_price_alert()
+
+    assert len(bot.messages) == 1
+    message = bot.messages[0]
+    assert message["chat_id"] == "chat-1"
+    assert message["parse_mode"] == "HTML"
+    assert "BIẾN ĐỘNG GIÁ" in message["text"]
+    assert "100 → 100.10" in message["text"]
+    assert "+0.10%" in message["text"]
+
+
+@pytest.mark.asyncio
+async def test_price_alert_uses_cooldown_but_keeps_latest_snapshot() -> None:
+    bot = FakeBot()
+    service = SchedulerService(
+        quote_handler=cast(
+            Any,
+            SequentialQuoteHandler(
+                [Decimal("100"), Decimal("100.2"), Decimal("100.5"), Decimal("100.7")],
+            ),
+        ),
+        news_handler=cast(Any, FakeNewsHandler()),
+        watchlist_service=cast(Any, FakeWatchlistService(symbols=["FPT"])),
+        bot=cast(Any, bot),
+        settings=_settings(),
+    )
+
+    with patch("stocktrace.infrastructure.scheduler.service.datetime") as mock_datetime:
+        mock_datetime.now.return_value = MARKET_OPEN_TIME
+        await service.send_price_alert()
+        mock_datetime.now.return_value = MARKET_OPEN_TIME + timedelta(minutes=1)
+        await service.send_price_alert()
+        mock_datetime.now.return_value = MARKET_OPEN_TIME + timedelta(minutes=2)
+        await service.send_price_alert()
+        mock_datetime.now.return_value = MARKET_OPEN_TIME + timedelta(minutes=6)
+        await service.send_price_alert()
+
     assert len(bot.messages) == TWO_ITEMS
+    assert "100 → 100.20" in bot.messages[0]["text"]
+    assert "100.50 → 100.70" in bot.messages[1]["text"]
 
 
 @pytest.mark.asyncio

@@ -14,6 +14,10 @@ class MarketDataError(RuntimeError):
     """Raised when external market data cannot be retrieved."""
 
 
+class ProviderUnavailableError(MarketDataError):
+    """Raised when every configured provider for a data type is unavailable."""
+
+
 class QuoteNotFoundError(MarketDataError):
     """Raised when a provider cannot find a quote for the symbol."""
 

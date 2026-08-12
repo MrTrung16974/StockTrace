@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from decimal import Decimal
 from enum import StrEnum
 from functools import lru_cache
 from typing import Annotated
@@ -136,6 +137,8 @@ class SchedulerSettings(BaseModel):
     news_enabled: bool = True
     news_digest_hours: list[int] = Field(default_factory=lambda: [8, 12, 16, 20])
     price_alert_interval_minutes: int = Field(default=1, ge=1)
+    price_change_threshold_percent: Decimal = Field(default=Decimal("0.1"), gt=0)
+    price_alert_cooldown_minutes: int = Field(default=5, ge=0)
     news_digest_limit: int = Field(default=5, ge=1, le=20)
     news_symbol_delay_seconds: float = Field(default=0.5, ge=0)
     analysis_enabled: bool = False

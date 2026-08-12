@@ -58,6 +58,7 @@ from stocktrace.infrastructure.providers.financial.composite import CompositeFin
 from stocktrace.infrastructure.providers.financial.mock_provider import MockFinancialProvider
 from stocktrace.infrastructure.providers.financial.vnstock_provider import VNStockFinancialProvider
 from stocktrace.infrastructure.providers.official_google_news import OfficialGoogleNewsTraceProvider
+from stocktrace.infrastructure.providers.resilient_provider import ResilientQuoteProvider
 from stocktrace.infrastructure.providers.vnstock_index import VNStockIndexProvider
 from stocktrace.infrastructure.providers.yahoo import YahooFinanceQuoteProvider
 from stocktrace.infrastructure.providers.yahoo_historical import YahooHistoricalProvider
@@ -204,8 +205,16 @@ class Container:
         """Build the market data service."""
         if self._market_data_service is None:
             timeout_seconds = float(self._settings.providers.request_timeout_seconds)
+            quote_provider = ResilientQuoteProvider(
+                YahooFinanceQuoteProvider(timeout_seconds=timeout_seconds),
+                provider_name="yahoo-finance",
+                timeout_seconds=timeout_seconds,
+                max_retries=max(1, self._settings.providers.max_retries + 1),
+                failure_threshold=self._settings.providers.circuit_breaker_failure_threshold,
+                recovery_timeout=float(self._settings.providers.circuit_breaker_reset_seconds),
+            )
             self._market_data_service = MarketDataService(
-                quote_provider=YahooFinanceQuoteProvider(timeout_seconds=timeout_seconds),
+                quote_provider=quote_provider,
                 news_provider=YahooFinanceNewsProvider(timeout_seconds=timeout_seconds),
             )
         return self._market_data_service

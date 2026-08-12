@@ -20,7 +20,11 @@ from stocktrace.application.services.financial.financial_analysis_service import
 )
 from stocktrace.application.services.financial.snapshot_service import FinancialSnapshotService
 from stocktrace.application.services.market_analysis_service import MarketAnalysisService
-from stocktrace.application.services.market_data import MarketDataError, MarketDataService
+from stocktrace.application.services.market_data import (
+    MarketDataError,
+    MarketDataService,
+    ProviderUnavailableError,
+)
 from stocktrace.application.services.news_quality import (
     is_recognized_financial_source,
     select_recent_unique_news,
@@ -463,6 +467,9 @@ def create_router(  # noqa: PLR0915
         except InvalidSymbolError as exc:
             await message.answer(str(exc))
             return
+        except ProviderUnavailableError:
+            await message.answer("Nguồn giá hiện không phản hồi. Vui lòng thử lại sau.")
+            return
         except MarketDataError:
             await message.answer("Không thể lấy dữ liệu giá. Vui lòng thử lại sau.")
             return
@@ -515,6 +522,9 @@ def create_router(  # noqa: PLR0915
                 ]
         except InvalidSymbolError as exc:
             await message.answer(str(exc))
+            return
+        except ProviderUnavailableError:
+            await message.answer("Nguồn tin hiện không phản hồi. Vui lòng thử lại sau.")
             return
         except MarketDataError:
             await message.answer("Không thể lấy tin tức. Vui lòng thử lại sau.")

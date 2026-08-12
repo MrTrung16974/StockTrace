@@ -10,7 +10,7 @@ from urllib.parse import urlparse
 import feedparser
 import httpx
 
-from stocktrace.application.services.market_data import NewsArticle
+from stocktrace.application.services.market_data import NewsArticle, ProviderUnavailableError
 from stocktrace.infrastructure.logging.config import get_logger
 
 MIN_VN_SYMBOL_LENGTH = 2
@@ -114,20 +114,55 @@ class YahooFinanceNewsProvider:
         self._logger = get_logger(__name__)
 
     async def get_news(self, symbol: str, limit: int) -> list[NewsArticle]:
-        """Return latest news articles for a symbol."""
+        """Return latest news articles, distinguishing empty feeds from outages."""
         fetch_limit = max(limit, limit * FETCH_MULTIPLIER)
+        failures: list[ProviderUnavailableError] = []
+        has_successful_response = False
+
+        async def fetch_google() -> list[NewsArticle] | None:
+            nonlocal has_successful_response
+            try:
+                articles = await self._fetch_google_news(symbol=symbol, limit=fetch_limit)
+            except ProviderUnavailableError as exc:
+                failures.append(exc)
+                return None
+            has_successful_response = True
+            return articles
+
+        async def fetch_yahoo(candidate: str) -> list[NewsArticle] | None:
+            nonlocal has_successful_response
+            try:
+                articles = await self._fetch_yahoo_news(
+                    candidate,
+                    ticker=symbol,
+                    limit=fetch_limit,
+                )
+            except ProviderUnavailableError as exc:
+                failures.append(exc)
+                return None
+            has_successful_response = True
+            return articles
+
         if _looks_like_vietnam_symbol(symbol):
-            articles = await self._fetch_google_news(symbol=symbol, limit=fetch_limit)
+            articles = await fetch_google()
             if articles:
                 return _latest_articles(articles, limit)
 
         for candidate in _candidate_symbols(symbol):
-            articles = await self._fetch_yahoo_news(candidate, ticker=symbol, limit=fetch_limit)
+            articles = await fetch_yahoo(candidate)
             if articles:
                 return _latest_articles(articles, limit)
 
-        articles = await self._fetch_google_news(symbol=symbol, limit=fetch_limit)
-        return _latest_articles(articles, limit)
+        # Vietnamese tickers already tried the preferred Google feed above.
+        if not _looks_like_vietnam_symbol(symbol):
+            articles = await fetch_google()
+            if articles:
+                return _latest_articles(articles, limit)
+
+        if has_successful_response:
+            return []
+        detail = "; ".join(str(error) for error in failures) or "No news provider responded."
+        raise ProviderUnavailableError(f"News providers are unavailable: {detail}")
 
     async def _fetch_yahoo_news(
         self,
@@ -146,7 +181,8 @@ class YahooFinanceNewsProvider:
                 response.raise_for_status()
         except httpx.HTTPError as exc:
             self._logger.warning("yahoo_news_fetch_failed", symbol=symbol, error=str(exc))
-            return []
+            msg = f"Yahoo Finance news is unavailable for {symbol}."
+            raise ProviderUnavailableError(msg) from exc
 
         return _parse_articles(
             response.text,
@@ -172,7 +208,7 @@ class YahooFinanceNewsProvider:
                 response.raise_for_status()
         except httpx.HTTPError as exc:
             self._logger.warning("google_news_fetch_failed", symbol=symbol, error=str(exc))
-            return []
+            raise ProviderUnavailableError(f"Google News is unavailable for {symbol}.") from exc
 
         return _parse_articles(
             response.text,

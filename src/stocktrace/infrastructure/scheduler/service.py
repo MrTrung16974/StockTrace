@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable
-from datetime import datetime
+from dataclasses import dataclass
+from datetime import datetime, timedelta
 from decimal import Decimal
 from html import escape
 from typing import TypeVar
@@ -35,6 +36,15 @@ from stocktrace.infrastructure.scheduler.trace_ingestion_job import TraceIngesti
 T = TypeVar("T")
 ONE_HOUR_MINUTES = 60
 ONE_DAY_HOURS = 24
+
+
+@dataclass(frozen=True, slots=True)
+class PriceChangeEvent:
+    """A meaningful movement between two scheduler price snapshots."""
+
+    quote: StockQuote
+    previous_price: Decimal
+    change_percent: Decimal
 
 
 class SchedulerService:
@@ -70,6 +80,8 @@ class SchedulerService:
         self._scheduler = scheduler or AsyncIOScheduler(timezone=self._timezone)
         self._logger = get_logger(__name__)
         self._sent_news_urls: set[str] = set()
+        self._last_price_by_symbol: dict[str, Decimal] = {}
+        self._last_price_alert_at: dict[str, datetime] = {}
 
     @property
     def is_running(self) -> bool:
@@ -124,7 +136,7 @@ class SchedulerService:
                 coalesce=True,
             )
             has_job = True
-        if self._stock_analysis_job is not None:
+        if self._stock_analysis_job is not None and self._settings.scheduler.analysis_enabled:
             self._scheduler.add_job(
                 self._stock_analysis_job.run_morning_report,
                 CronTrigger(
@@ -298,7 +310,7 @@ class SchedulerService:
                 self._logger.error("news_digest_send_failed", symbol=symbol, error=str(exc))
 
     async def send_price_alert(self) -> None:
-        """Send a single price board message for all watchlist symbols (async fanout)."""
+        """Notify only when a watchlist price changes materially since the prior poll."""
         now = datetime.now(tz=self._timezone)
         if not is_vn_market_open(now, timezone=self._timezone):
             self._logger.info("price_alert_skipped", reason="market_closed")
@@ -338,9 +350,14 @@ class SchedulerService:
             self._logger.info("price_alert_skipped", reason="no_quotes")
             return
 
+        events = self._detect_price_change_events(quotes, now=now)
+        if not events:
+            self._logger.info("price_alert_skipped", reason="no_material_price_change")
+            return
+
         await self._bot.send_message(
             chat_id=chat_id,
-            text=self._build_price_alert_message(quotes, now=now),
+            text=self._build_price_alert_message(events, now=now),
             parse_mode="HTML",
             disable_web_page_preview=True,
         )
@@ -415,13 +432,54 @@ class SchedulerService:
             lines.append("")
         return "\n".join(lines).rstrip()
 
-    def _build_price_alert_message(self, quotes: list[StockQuote], *, now: datetime) -> str:
-        lines = [f"📊 Bảng giá — {now:%H:%M}", ""]
+    def _detect_price_change_events(
+        self,
+        quotes: list[StockQuote],
+        *,
+        now: datetime,
+    ) -> list[PriceChangeEvent]:
+        """Save each snapshot and return changes that pass threshold and cooldown checks."""
+        threshold = self._settings.scheduler.price_change_threshold_percent
+        cooldown = timedelta(minutes=self._settings.scheduler.price_alert_cooldown_minutes)
+        events: list[PriceChangeEvent] = []
+
         for quote in quotes:
+            symbol = quote.ticker.upper()
+            previous_price = self._last_price_by_symbol.get(symbol)
+            self._last_price_by_symbol[symbol] = quote.current_price
+            if previous_price is None or previous_price <= 0:
+                continue
+
+            change_percent = (
+                (quote.current_price - previous_price) / previous_price * Decimal("100")
+            )
+            if abs(change_percent) < threshold:
+                continue
+
+            last_alert_at = self._last_price_alert_at.get(symbol)
+            if cooldown and last_alert_at is not None and now - last_alert_at < cooldown:
+                self._logger.info("price_alert_skipped", symbol=symbol, reason="cooldown")
+                continue
+
+            events.append(
+                PriceChangeEvent(
+                    quote=quote,
+                    previous_price=previous_price,
+                    change_percent=change_percent,
+                ),
+            )
+            self._last_price_alert_at[symbol] = now
+
+        return events
+
+    def _build_price_alert_message(self, events: list[PriceChangeEvent], *, now: datetime) -> str:
+        lines = [f"🔔 <b>BIẾN ĐỘNG GIÁ</b> — {now:%H:%M}", ""]
+        for event in events:
+            quote = event.quote
             lines.append(
-                f"{escape(quote.ticker):<5} "
-                f"{_format_price(quote.current_price):>10}  "
-                f"{_trend_icon(quote.change_percent)} {_format_percent(quote.change_percent)}"
+                f"<b>{escape(quote.ticker)}</b>: "
+                f"{_format_price(event.previous_price)} → {_format_price(quote.current_price)} "
+                f"{_trend_icon(event.change_percent)} {_format_percent(event.change_percent)}"
             )
         return "\n".join(lines)
 

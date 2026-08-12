@@ -62,4 +62,22 @@ def test_build_market_analysis_report_no_analysis():
     report = build_market_analysis_report(bundle)
     
     assert "BÁO CÁO THỊ TRƯỜNG TÀI CHÍNH VIỆT NAM" in report
-    assert "Không có phân tích AI." in report
+    assert "Phân tích AI đang tắt." in report
+
+
+def test_build_market_analysis_report_shows_provider_outage() -> None:
+    bundle = MarketAnalysisBundle(
+        timestamp=datetime.now(UTC),
+        indices={},
+        sectors={},
+        international={},
+        news=(),
+        analysis=None,
+        ai_status="unavailable",
+        news_error="Nguồn tin thị trường hiện không phản hồi.",
+    )
+
+    report = build_market_analysis_report(bundle)
+
+    assert "Phân tích AI tạm không khả dụng" in report
+    assert "Nguồn tin thị trường hiện không phản hồi." in report

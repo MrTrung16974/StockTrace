@@ -126,4 +126,6 @@ async def get_market_analysis(
         news=news_list,
         ai_analysis=ai_analysis,
         ai_enabled=svc.is_enabled,
+        ai_status=bundle.ai_status,
+        news_error=bundle.news_error,
     )

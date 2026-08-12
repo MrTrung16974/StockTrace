@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from dataclasses import asdict, dataclass
 
@@ -204,36 +205,26 @@ class StockAnalysisService:
         *,
         limit: int = _DEFAULT_NEWS_LIMIT,
     ) -> tuple[list[NewsArticle], StockAnalysisResult | None]:
-        """Prioritize AI analysis first, then fetch Google News articles."""
+        """Fetch verified news and run a single AI pass against that context."""
         normalized = symbol.strip().upper()
 
-        # 1. Ưu tiên gọi phân tích AI ngay từ đầu (với dữ liệu giá hiện tại)
-        quote = await self._safe_get_quote(normalized)
-        initial_context = AnalysisContext(
-            symbol=normalized,
-            news=(),
-            mode=AnalysisMode.NEWS_ONLY,
-            price=quote,
+        quote_task = asyncio.create_task(self._safe_get_quote(normalized))
+        news_task = asyncio.create_task(
+            self._news_handler.handle(GetNewsQuery(symbol=normalized, limit=limit)),
         )
-        analysis_task = asyncio.create_task(self._analysis_service.analyze(initial_context))
+        quote, articles = await asyncio.gather(quote_task, news_task)
+        articles = select_recent_unique_news(articles, limit=limit)
+        articles = await self._maybe_translate(normalized, articles)
 
-        # 2. Đồng thời / sau đó mới truy xuất Google News
-        articles: list[NewsArticle] = []
-        try:
-            articles = await self._news_handler.handle(GetNewsQuery(symbol=normalized, limit=limit))
-            articles = select_recent_unique_news(articles, limit=limit)
-            articles = await self._maybe_translate(normalized, articles)
-        except Exception as exc:
-            self._logger.warning("news_fetch_failed_during_ai_priority", symbol=normalized, error=str(exc))
-            articles = []
-
-        analysis = await analysis_task
-
-        # Nếu lấy được tin tức thực tế từ Google News, tiến hành cập nhật phân tích AI cùng tin tức
-        if articles:
-            updated_analysis = await self.analyze_news(normalized, articles, include_price=True)
-            if updated_analysis is not None:
-                analysis = updated_analysis
+        analysis = None
+        if articles and self.is_enabled:
+            context = AnalysisContext(
+                symbol=normalized,
+                news=tuple(articles),
+                mode=AnalysisMode.NEWS_ONLY,
+                price=quote,
+            )
+            analysis = await self._analysis_service.analyze(context)
 
         return articles, analysis
 

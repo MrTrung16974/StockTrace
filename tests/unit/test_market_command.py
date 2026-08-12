@@ -30,6 +30,7 @@ async def test_market_command_no_service() -> None:
     router = create_router(
         settings=settings,
         watchlist_service=AsyncMock(),
+        portfolio_service=AsyncMock(),
         market_data_service=AsyncMock(),
         market_analysis_service=None,
     )
@@ -45,6 +46,7 @@ def test_financial_commands_are_registered() -> None:
     router = create_router(
         settings=settings,
         watchlist_service=AsyncMock(),
+        portfolio_service=AsyncMock(),
         market_data_service=AsyncMock(),
         financial_analysis_service=AsyncMock(),
     )
@@ -66,6 +68,7 @@ def test_trace_commands_are_registered() -> None:
     router = create_router(
         settings=settings,
         watchlist_service=AsyncMock(),
+        portfolio_service=AsyncMock(),
         market_data_service=AsyncMock(),
         trace_service=AsyncMock(),
     )

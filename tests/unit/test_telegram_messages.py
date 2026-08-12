@@ -73,7 +73,7 @@ def test_build_watchlist_message_lists_symbols() -> None:
 
 def test_build_added_and_removed_messages() -> None:
     assert build_added_message("FPT") == "Đã thêm FPT vào danh sách theo dõi."
-    assert build_removed_message("FPT", removed=True) == "Đã xóa FPT khỏi danh sách theo dõi."
+    assert build_removed_message("FPT", removed=True) == "Đã xoá FPT khỏi danh sách theo dõi."
     assert build_removed_message("FPT", removed=False) == "FPT không có trong danh sách theo dõi."
 
 

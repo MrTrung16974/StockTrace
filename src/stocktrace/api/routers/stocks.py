@@ -21,6 +21,7 @@ from stocktrace.application.queries.stock_handlers import (
     GetStockQuoteQueryHandler,
 )
 from stocktrace.application.queries.stock_queries import GetNewsQuery, GetPriceQuery
+from stocktrace.application.services.market_data import ProviderUnavailableError
 from stocktrace.application.services.stock_analysis_service import StockAnalysisService
 from stocktrace.bootstrap.container import Container
 
@@ -53,6 +54,11 @@ async def get_quote(
         quote = await _quote_handler(container).handle(GetPriceQuery(symbol=ticker))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except ProviderUnavailableError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Quote provider is temporarily unavailable.",
+        ) from exc
 
     if quote is None:
         raise HTTPException(status_code=404, detail=f"Quote not found for {ticker}.")
@@ -92,6 +98,11 @@ async def get_news(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except ProviderUnavailableError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="News provider is temporarily unavailable.",
+        ) from exc
 
     normalized = ticker.strip().upper()
 

@@ -66,3 +66,5 @@ class MarketAnalysisResponse(BaseModel):
 
     # Meta
     ai_enabled: bool = False
+    ai_status: str = Field(description="available / disabled / unavailable")
+    news_error: str | None = None

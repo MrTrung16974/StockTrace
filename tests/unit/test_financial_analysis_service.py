@@ -3,13 +3,19 @@
 from __future__ import annotations
 
 import pytest
+from pydantic import SecretStr
+from unittest.mock import AsyncMock
 
+from stocktrace.application.services.financial.ai_financial_analysis_service import (
+    AIFinancialAnalysisService,
+)
 from stocktrace.application.services.financial.financial_analysis_service import (
     FinancialAnalysisService,
 )
 from stocktrace.domain.ports.financial_provider import FinancialDataNotFoundError
 from stocktrace.domain.value_objects.financial_period import FinancialPeriod
 from stocktrace.infrastructure.providers.financial.mock_provider import MockFinancialProvider
+from stocktrace.infrastructure.config.settings import AISettings
 
 _EXPECTED_CHART_COUNT = 5
 
@@ -73,3 +79,22 @@ async def test_unknown_symbol_raises(service: FinancialAnalysisService) -> None:
     period = FinancialPeriod.parse("1Y")
     with pytest.raises(FinancialDataNotFoundError):
         await service.analyze("UNKNOWN", period)
+
+
+@pytest.mark.asyncio
+async def test_financial_ai_falls_back_when_llm_request_fails(
+    service: FinancialAnalysisService,
+) -> None:
+    dashboard = await service.analyze("FPT", FinancialPeriod.parse("1Y"))
+    llm = AsyncMock()
+    llm.complete.side_effect = RuntimeError("quota exhausted")
+    ai_service = AIFinancialAnalysisService(
+        llm=llm,
+        settings=AISettings(enabled=True, api_key=SecretStr("test-key")),
+    )
+
+    result = await ai_service.analyze(dashboard.analysis)
+
+    assert result is not None
+    assert result.symbol == "FPT"
+    assert result.raw_response == ""

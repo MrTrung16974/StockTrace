@@ -6,7 +6,11 @@ import pytest
 
 from stocktrace.ai.models import MarketAnalysisResult, SentimentLabel
 from stocktrace.application.services.market_analysis_service import MarketAnalysisService
-from stocktrace.application.services.market_data import NewsArticle, StockQuote
+from stocktrace.application.services.market_data import (
+    NewsArticle,
+    ProviderUnavailableError,
+    StockQuote,
+)
 
 
 @pytest.fixture
@@ -95,6 +99,10 @@ async def test_market_analysis_service_success(
     assert len(bundle.news) == 1
     assert bundle.analysis is not None
     assert bundle.analysis.sentiment == SentimentLabel.POSITIVE
+    assert bundle.ai_status == "available"
+    context = mock_analysis_service.analyze_market.await_args.args[0]
+    assert context.news == tuple(bundle.news)
+    mock_analysis_service.analyze_market.assert_awaited_once()
     index_calls = mock_vietnam_index_provider.get_index_quote.await_args_list
     index_symbols = [call.args[0] for call in index_calls]
     assert index_symbols == ["VNINDEX", "VN30", "HNXINDEX", "UPCOMINDEX"]
@@ -112,7 +120,28 @@ async def test_market_analysis_service_ai_disabled(mock_market_data_service, moc
     bundle = await service.analyze_market()
 
     assert bundle.analysis is None
+    assert bundle.ai_status == "disabled"
     mock_analysis_service.analyze_market.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_market_analysis_keeps_report_when_news_provider_is_unavailable(
+    mock_market_data_service,
+    mock_analysis_service,
+):
+    mock_market_data_service.get_market_news.side_effect = ProviderUnavailableError("offline")
+    service = MarketAnalysisService(
+        analysis_service=mock_analysis_service,
+        market_data_service=mock_market_data_service,
+    )
+
+    bundle = await service.analyze_market()
+
+    assert bundle.news == ()
+    assert bundle.news_error == "Nguồn tin thị trường hiện không phản hồi."
+    assert bundle.analysis is not None
+    context = mock_analysis_service.analyze_market.await_args.args[0]
+    assert context.news == ()
 
 
 @pytest.mark.asyncio

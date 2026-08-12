@@ -10,6 +10,7 @@ import pytest
 import respx
 from httpx import Response
 
+from stocktrace.application.services.market_data import ProviderUnavailableError
 from stocktrace.infrastructure.news.yahoo import YahooFinanceNewsProvider
 from stocktrace.infrastructure.providers.yahoo import YahooFinanceQuoteProvider
 
@@ -279,13 +280,12 @@ async def test_vietnam_news_provider_accepts_official_policy_source() -> None:
 
 @pytest.mark.asyncio
 @respx.mock
-async def test_yahoo_news_provider_returns_empty_when_all_sources_fail() -> None:
+async def test_yahoo_news_provider_reports_outage_when_all_sources_fail() -> None:
     respx.get("https://feeds.finance.yahoo.com/rss/2.0/headline").mock(
         side_effect=[Response(404), Response(404)],
     )
     respx.get("https://news.google.com/rss/search").mock(return_value=Response(503))
 
     provider = YahooFinanceNewsProvider(timeout_seconds=1)
-    articles = await provider.get_news("MBB.US", limit=5)
-
-    assert articles == []
+    with pytest.raises(ProviderUnavailableError, match="News providers are unavailable"):
+        await provider.get_news("MBB.US", limit=5)

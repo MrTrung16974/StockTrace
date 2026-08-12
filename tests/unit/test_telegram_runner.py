@@ -18,6 +18,7 @@ async def test_telegram_runner_skips_when_token_is_missing() -> None:
     runner = TelegramBotRunner(
         settings=settings,
         watchlist_service=container.watchlist_service(),
+        portfolio_service=container.portfolio_service(),
         market_data_service=container.market_data_service(),
     )
 
@@ -39,6 +40,7 @@ async def test_telegram_runner_does_not_crash_on_invalid_token() -> None:
     runner = TelegramBotRunner(
         settings=settings,
         watchlist_service=container.watchlist_service(),
+        portfolio_service=container.portfolio_service(),
         market_data_service=container.market_data_service(),
     )
 

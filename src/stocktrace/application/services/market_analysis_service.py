@@ -11,6 +11,7 @@ from stocktrace.ai.models import MarketAnalysisContext, MarketAnalysisResult
 from stocktrace.application.services.market_data import (
     MarketDataService,
     NewsArticle,
+    ProviderUnavailableError,
     StockQuote,
     VietnamIndexProvider,
 )
@@ -49,6 +50,8 @@ class MarketAnalysisBundle:
     international: dict[str, StockQuote | None]
     news: tuple[NewsArticle, ...]
     analysis: MarketAnalysisResult | None
+    ai_status: str = "disabled"
+    news_error: str | None = None
 
 
 class MarketAnalysisService:
@@ -92,41 +95,37 @@ class MarketAnalysisService:
             else dict.fromkeys(INTERNATIONAL)
         )
 
-        # 2. Ưu tiên gọi phân tích AI trước mà không bị chặn bởi việc lấy tin từ Google News
-        analysis_task = None
-        if self.is_enabled:
-            initial_context = MarketAnalysisContext(
-                indices=indices,
-                sectors=sectors,
-                international=international,
-                news=(),
-            )
-            analysis_task = asyncio.create_task(self._analysis_service.analyze_market(initial_context))
-
-        # 3. Sau đó / đồng thời gọi Google News để lấy tin thị trường
+        # 2. Retrieve news before the single AI pass so the result always has its context.
+        news_error = None
         try:
             news_raw = await self._fetch_news(MARKET_NEWS_QUERY, limit=news_limit)
-            news = select_recent_unique_news(news_raw if isinstance(news_raw, list) else [], limit=news_limit)
-        except Exception as exc:
-            self._logger.warning("market_news_fetch_failed_during_ai_priority", error=str(exc))
+            raw_articles = news_raw if isinstance(news_raw, list) else []
+            news = select_recent_unique_news(raw_articles, limit=news_limit)
+        except ProviderUnavailableError as exc:
+            self._logger.warning("market_news_provider_unavailable", error=str(exc))
             news = []
+            news_error = "Nguồn tin thị trường hiện không phản hồi."
+        except Exception as exc:
+            self._logger.warning("market_news_fetch_failed", error=str(exc))
+            news = []
+            news_error = "Không thể tải tin thị trường trong lần này."
 
-        analysis: MarketAnalysisResult | None = await analysis_task if analysis_task else None
-
-        # Nếu có tin thị trường từ Google News, cập nhật bổ sung vào bài phân tích AI
-        if news and self.is_enabled:
+        # 3. One Gemini request with the complete market snapshot and fetched news.
+        analysis: MarketAnalysisResult | None = None
+        ai_status = "disabled"
+        if self.is_enabled:
             try:
-                updated_context = MarketAnalysisContext(
+                context = MarketAnalysisContext(
                     indices=indices,
                     sectors=sectors,
                     international=international,
                     news=tuple(news),
                 )
-                updated_analysis = await self._analysis_service.analyze_market(updated_context)
-                if updated_analysis is not None:
-                    analysis = updated_analysis
-            except Exception:
-                pass
+                analysis = await self._analysis_service.analyze_market(context)
+                ai_status = "available" if analysis is not None else "unavailable"
+            except Exception as exc:
+                self._logger.warning("market_ai_analysis_failed", error=str(exc))
+                ai_status = "unavailable"
 
         bundle = MarketAnalysisBundle(
             timestamp=datetime.now(UTC),
@@ -135,6 +134,8 @@ class MarketAnalysisService:
             international=international,
             news=tuple(news),
             analysis=analysis,
+            ai_status=ai_status,
+            news_error=news_error,
         )
         self._logger.info("market_analysis_completed", has_analysis=analysis is not None)
         return bundle
@@ -178,8 +179,4 @@ class MarketAnalysisService:
         return results
 
     async def _fetch_news(self, query: str, limit: int) -> list[NewsArticle]:
-        try:
-            return await self._market_data_service.get_market_news(query, limit=limit)
-        except Exception as exc:
-            self._logger.warning("market_analysis_fetch_news_failed", query=query, error=str(exc))
-            return []
+        return await self._market_data_service.get_market_news(query, limit=limit)
