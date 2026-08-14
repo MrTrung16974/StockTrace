@@ -32,7 +32,7 @@ logger = get_logger(__name__)
 _PERIOD_PATTERN = re.compile(r"^(?P<year>\d{4})-Q(?P<quarter>[1-4])")
 _ANNUAL_PERIOD_PATTERN = re.compile(r"^(?P<year>\d{4})$")
 _INCOME_IDS = {
-    "revenue": ("revenue", "net_revenue", "total_operating_income"),
+    "revenue": ("revenue", "net_revenue", "net_sales", "total_operating_income"),
     "cost_of_goods": ("cost_of_goods_sold", "cost_of_sales"),
     "gross_profit": ("gross_profit",),
     "operating_expenses": ("selling_expenses", "general_and_admin_expenses"),
@@ -46,7 +46,7 @@ _INCOME_IDS = {
 }
 _BALANCE_IDS = {
     "total_assets": ("total_assets",),
-    "total_liabilities": ("total_liabilities",),
+    "total_liabilities": ("total_liabilities", "liabilities"),
     "total_equity": ("owners_equity", "total_equity"),
     "cash": ("cash_and_cash_equivalents", "cash_and_precious_metals"),
     "inventory": ("inventories", "inventory"),
@@ -56,9 +56,18 @@ _BALANCE_IDS = {
     "long_term_debt": ("long_term_borrowings", "long_term_debt"),
 }
 _CASH_FLOW_IDS = {
-    "operating": ("net_cash_from_operating_activities",),
-    "investing": ("net_cash_from_investing_activities",),
-    "financing": ("net_cash_from_financing_activities",),
+    "operating": (
+        "net_cash_from_operating_activities",
+        "net_cash_inflows_outflows_from_operating_activities",
+    ),
+    "investing": (
+        "net_cash_from_investing_activities",
+        "net_cash_inflows_outflows_from_investing_activities",
+    ),
+    "financing": (
+        "net_cash_from_financing_activities",
+        "net_cash_inflows_outflows_from_financing_activities",
+    ),
     "capex": ("purchases_of_fixed_assets_and_other_long_term_assets",),
 }
 
