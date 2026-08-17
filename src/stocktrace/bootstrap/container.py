@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from functools import lru_cache
 
 from stocktrace.ai.analysis_service import AnalysisService
@@ -20,6 +21,8 @@ from stocktrace.application.queries.stock_handlers import (
     GetStockNewsQueryHandler,
     GetStockQuoteQueryHandler,
 )
+from stocktrace.application.services.auto_trade_control import AutoTradeControlService
+from stocktrace.application.services.auto_trade_evaluation import AutoTradeEvaluationService
 from stocktrace.application.services.financial.ai_financial_analysis_service import (
     AIFinancialAnalysisService,
 )
@@ -32,9 +35,11 @@ from stocktrace.application.services.market_analysis_service import MarketAnalys
 from stocktrace.application.services.market_data import MarketDataService
 from stocktrace.application.services.portfolio import PortfolioService
 from stocktrace.application.services.stock_analysis_service import StockAnalysisService
+from stocktrace.application.services.suggestion_explanation import SuggestionExplanationService
 from stocktrace.application.services.trace import OfficialTraceIngestionService, TraceService
 from stocktrace.application.services.trace.trace_service import TraceRepository
 from stocktrace.application.services.watchlist import WatchlistService
+from stocktrace.domain.entities.auto_trade_control import AutoTradeControlState
 from stocktrace.domain.ports.ai_cache import AICache
 from stocktrace.domain.ports.market_data_cache import MarketDataCache
 from stocktrace.domain.repositories.portfolio import PortfolioRepository
@@ -53,7 +58,11 @@ from stocktrace.infrastructure.db.repositories import (
     SqlAlchemyWatchlistRepository,
 )
 from stocktrace.infrastructure.db.session import SessionManager
+from stocktrace.infrastructure.metrics.trade_pipeline import PrometheusTradePipelineObserver
 from stocktrace.infrastructure.news.yahoo import YahooFinanceNewsProvider
+from stocktrace.infrastructure.paper_trading.in_memory_auto_trade_control_repository import (
+    InMemoryAutoTradeControlRepository,
+)
 from stocktrace.infrastructure.providers.financial.composite import CompositeFinancialProvider
 from stocktrace.infrastructure.providers.financial.mock_provider import MockFinancialProvider
 from stocktrace.infrastructure.providers.financial.vnstock_provider import VNStockFinancialProvider
@@ -84,6 +93,7 @@ class Container:
         self._analysis_service: AnalysisService | None = None
         self._translation_service: TranslationService | None = None
         self._stock_analysis_service: StockAnalysisService | None = None
+        self._suggestion_explanation_service: SuggestionExplanationService | None = None
         self._market_analysis_service: MarketAnalysisService | None = None
         self._historical_provider: YahooHistoricalProvider | None = None
         self._financial_provider: CompositeFinancialProvider | None = None
@@ -92,6 +102,38 @@ class Container:
         self._ai_financial_service: AIFinancialAnalysisService | None = None
         self._trace_service: TraceService | None = None
         self._trace_ingestion_service: OfficialTraceIngestionService | None = None
+        self._auto_trade_control_repository = InMemoryAutoTradeControlRepository(
+            AutoTradeControlState(
+                state_id="system-startup-control",
+                kill_switch_active=True,
+                rollout_percentage=self._settings.auto_trade.rollout_percentage,
+                rollout_owner_ids=tuple(self._settings.auto_trade.rollout_owner_ids),
+                updated_by="system-startup",
+                updated_at=datetime.now(UTC),
+                kill_switch_reason="Auto-trading is disabled until a separate release is approved.",
+            ),
+        )
+        self._trade_pipeline_observer = PrometheusTradePipelineObserver()
+        self._auto_trade_control_service: AutoTradeControlService | None = None
+        self._auto_trade_evaluation_service: AutoTradeEvaluationService | None = None
+
+    def auto_trade_control_service(self) -> AutoTradeControlService:
+        """Build the operational stop-control service for the paper pilot only."""
+        if self._auto_trade_control_service is None:
+            self._auto_trade_control_service = AutoTradeControlService(
+                self._auto_trade_control_repository,
+                observer=self._trade_pipeline_observer,
+            )
+        return self._auto_trade_control_service
+
+    def auto_trade_evaluation_service(self) -> AutoTradeEvaluationService:
+        """Build auto-trade evaluation with dynamic stop/rollout controls."""
+        if self._auto_trade_evaluation_service is None:
+            self._auto_trade_evaluation_service = AutoTradeEvaluationService(
+                self._auto_trade_control_repository,
+                observer=self._trade_pipeline_observer,
+            )
+        return self._auto_trade_evaluation_service
 
     def financial_provider(self) -> CompositeFinancialProvider:
         """Build composite financial data provider."""
@@ -313,6 +355,16 @@ class Container:
             )
         return self._stock_analysis_service
 
+    def suggestion_explanation_service(self) -> SuggestionExplanationService:
+        """Build the presentation-only service for verified suggestions."""
+        if self._suggestion_explanation_service is None:
+            ai_settings = self._settings.ai
+            self._suggestion_explanation_service = SuggestionExplanationService(
+                llm=create_llm_provider(ai_settings) if ai_settings.enabled else None,
+                settings=ai_settings,
+            )
+        return self._suggestion_explanation_service
+
     def stock_analysis_job(self, bot: TelegramMessageBot) -> StockAnalysisJob:
         """Build scheduled AI analysis jobs."""
         return StockAnalysisJob(
@@ -364,7 +416,7 @@ class Container:
     async def dispose(self) -> None:
         """Dispose infrastructure resources."""
         if self._market_data_cache is not None and hasattr(self._market_data_cache, "close"):
-            await self._market_data_cache.close()  # type: ignore[func-returns-value]
+            await self._market_data_cache.close()
         if self._ai_cache is not None:
             await self._ai_cache.close()
         await self._session_manager.dispose()

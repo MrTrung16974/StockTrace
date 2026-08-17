@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from prometheus_client import Counter, Gauge, Histogram, CollectorRegistry, REGISTRY
+from prometheus_client import Counter, Gauge, Histogram
 
 # ---------------------------------------------------------------------------
 # Counters
@@ -106,4 +106,20 @@ circuit_breaker_state = Gauge(
     "stocktrace_circuit_breaker_state",
     "Circuit breaker state (0=CLOSED, 1=OPEN, 2=HALF_OPEN)",
     ["provider"],
+)
+
+auto_trade_gate_decisions_total = Counter(
+    "stocktrace_auto_trade_gate_decisions_total",
+    "Auto-trade gate decisions by outcome and first block reason",
+    ["outcome", "block_code"],
+)
+
+auto_trade_kill_switch_active = Gauge(
+    "stocktrace_auto_trade_kill_switch_active",
+    "Global auto-trade kill switch state (1=active, 0=inactive)",
+)
+
+auto_trade_rollout_percentage = Gauge(
+    "stocktrace_auto_trade_rollout_percentage",
+    "Percentage of deterministically enrolled auto-trade pilot owners",
 )

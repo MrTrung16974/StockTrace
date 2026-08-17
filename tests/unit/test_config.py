@@ -2,10 +2,17 @@
 
 from __future__ import annotations
 
+from decimal import Decimal
+
 import pytest
 from pydantic import SecretStr, ValidationError
 
-from stocktrace.infrastructure.config import Environment, Settings, TelegramSettings
+from stocktrace.infrastructure.config import (
+    AutoTradeSettings,
+    Environment,
+    Settings,
+    TelegramSettings,
+)
 from stocktrace.infrastructure.config.settings import SecuritySettings
 from stocktrace.infrastructure.config.test import load_test_settings
 
@@ -66,6 +73,41 @@ def test_ai_fallback_models_accept_comma_separated_environment_values(
     settings = Settings(_env_file=None)
 
     assert settings.ai.fallback_models == ["gemini-3.5-flash-lite", "gemini-2.5-flash"]
+
+
+def test_auto_trade_is_disabled_by_default_and_parses_pilot_allowlist(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("STOCKTRACE_AUTO_TRADE__ALLOWED_SYMBOLS", "hpg,fpt")
+
+    settings = Settings(_env_file=None)
+
+    assert settings.auto_trade.enabled is False
+    assert settings.auto_trade.allowed_symbols == ["HPG", "FPT"]
+
+
+def test_enabled_auto_trade_requires_a_symbol_allowlist() -> None:
+    with pytest.raises(ValidationError, match="ALLOWED_SYMBOLS"):
+        AutoTradeSettings(enabled=True)
+
+
+def test_auto_trade_settings_map_all_pilot_limits_to_domain_policy() -> None:
+    settings = AutoTradeSettings(
+        enabled=True,
+        allowed_symbols=["HPG"],
+        max_notional_per_order=Decimal("1000000"),
+        max_notional_per_day=Decimal("2000000"),
+        max_orders_per_day=1,
+        minimum_paper_observation_days=30,
+        minimum_paper_completed_orders=20,
+        policy_version="pilot-v1",
+    )
+
+    policy = settings.to_pilot_policy()
+
+    assert policy.enabled is True
+    assert policy.allowed_symbols == ("HPG",)
+    assert policy.policy_version == "pilot-v1"
 
 
 def test_prod_settings_load_with_required_secrets() -> None:

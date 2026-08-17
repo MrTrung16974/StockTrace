@@ -18,10 +18,13 @@ from stocktrace.infrastructure.config.settings import Settings, TelegramSettings
 from stocktrace.infrastructure.providers.financial.mock_provider import MockFinancialProvider
 from stocktrace.infrastructure.telegram.aiogram_router import (
     _build_financial_command_response,
+    _build_fresh_trace_timeline,
     _build_trace_command_response,
     _financial_usage,
     create_router,
 )
+
+_TIMELINE_REFRESH_CALL_COUNT = 2
 
 
 @pytest.mark.asyncio
@@ -118,6 +121,80 @@ def test_trace_commands_render_distinct_signal_and_risk_views() -> None:
     assert "Rủi ro cần theo dõi" in risks
     assert "HPG warning" in risks
     assert "HPG disclosure" not in risks
+
+
+@pytest.mark.asyncio
+async def test_trace_commands_refresh_missing_official_events_for_requested_symbol() -> None:
+    empty_timeline = TraceTimeline(
+        symbol="HPG",
+        events=(),
+        score=TraceScoringEngine().calculate("HPG", ()),
+    )
+    official_event = StockTraceEvent(
+        symbol="HPG",
+        event_type=TraceEventType.TRACE_DISCLOSURE,
+        severity=TraceSeverity.INFO,
+        title="HPG official disclosure",
+        summary="Official disclosure",
+        source=official_trace_sources()[1],
+        confidence=Decimal("1"),
+    )
+    refreshed_timeline = TraceTimeline(
+        symbol="HPG",
+        events=(official_event,),
+        score=TraceScoringEngine().calculate("HPG", (official_event,)),
+    )
+    trace_service = AsyncMock()
+    trace_service.build_timeline.side_effect = [empty_timeline, refreshed_timeline]
+    ingestion_service = AsyncMock()
+    settings = Settings(telegram=TelegramSettings(allowed_user_ids=[123]))
+
+    timeline = await _build_fresh_trace_timeline(
+        trace_service=trace_service,
+        trace_ingestion_service=ingestion_service,
+        settings=settings,
+        symbol="HPG",
+    )
+
+    assert timeline == refreshed_timeline
+    ingestion_service.ingest_symbol.assert_awaited_once_with(
+        "HPG",
+        limit=settings.scheduler.trace_ingest_limit,
+    )
+    assert trace_service.build_timeline.await_count == _TIMELINE_REFRESH_CALL_COUNT
+
+
+@pytest.mark.asyncio
+async def test_trace_commands_do_not_refetch_when_official_events_are_stored() -> None:
+    official_event = StockTraceEvent(
+        symbol="HPG",
+        event_type=TraceEventType.TRACE_DISCLOSURE,
+        severity=TraceSeverity.INFO,
+        title="HPG official disclosure",
+        summary="Official disclosure",
+        source=official_trace_sources()[1],
+        confidence=Decimal("1"),
+    )
+    timeline = TraceTimeline(
+        symbol="HPG",
+        events=(official_event,),
+        score=TraceScoringEngine().calculate("HPG", (official_event,)),
+    )
+    trace_service = AsyncMock()
+    trace_service.build_timeline.return_value = timeline
+    ingestion_service = AsyncMock()
+    settings = Settings(telegram=TelegramSettings(allowed_user_ids=[123]))
+
+    result = await _build_fresh_trace_timeline(
+        trace_service=trace_service,
+        trace_ingestion_service=ingestion_service,
+        settings=settings,
+        symbol="HPG",
+    )
+
+    assert result == timeline
+    ingestion_service.ingest_symbol.assert_not_awaited()
+    trace_service.build_timeline.assert_awaited_once_with("HPG", limit=10)
 
 
 @pytest.mark.asyncio

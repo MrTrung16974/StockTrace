@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import timedelta
 from decimal import Decimal
 from enum import StrEnum
 from functools import lru_cache
@@ -9,6 +10,8 @@ from typing import Annotated
 
 from pydantic import AliasChoices, BaseModel, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
+
+from stocktrace.domain.entities.auto_trade import AutoTradePilotPolicy
 
 
 class Environment(StrEnum):
@@ -159,6 +162,10 @@ class SchedulerSettings(BaseModel):
     price_alert_interval_minutes: int = Field(default=1, ge=1)
     price_change_threshold_percent: Decimal = Field(default=Decimal("0.1"), gt=0)
     price_alert_cooldown_minutes: int = Field(default=5, ge=0)
+    suggestion_alert_enabled: bool = False
+    suggestion_alert_interval_minutes: int = Field(default=5, ge=1)
+    paper_confirmation_expiry_enabled: bool = False
+    paper_confirmation_expiry_interval_minutes: int = Field(default=1, ge=1)
     news_digest_limit: int = Field(default=5, ge=1, le=20)
     news_symbol_delay_seconds: float = Field(default=0.5, ge=0)
     analysis_enabled: bool = False
@@ -198,6 +205,70 @@ class SchedulerSettings(BaseModel):
         if isinstance(value, str):
             return [symbol.strip().upper() for symbol in value.split(",") if symbol.strip()]
         return value
+
+
+class AutoTradeSettings(BaseModel):
+    """Fail-closed limits for a separately approved auto-trading pilot."""
+
+    enabled: bool = False
+    allowed_symbols: Annotated[list[str], NoDecode] = Field(default_factory=list)
+    max_notional_per_order: Decimal = Field(default=Decimal("1000000"), gt=0)
+    max_notional_per_day: Decimal = Field(default=Decimal("2000000"), gt=0)
+    max_orders_per_day: int = Field(default=1, ge=1)
+    minimum_paper_observation_days: int = Field(default=30, ge=1)
+    minimum_paper_completed_orders: int = Field(default=20, ge=1)
+    policy_version: str = "auto-trade-pilot-v1"
+    rollout_percentage: int = Field(default=0, ge=0, le=100)
+    rollout_owner_ids: Annotated[list[str], NoDecode] = Field(default_factory=list)
+    control_key: SecretStr | None = None
+    control_key_header: str = "X-Auto-Trade-Control-Key"
+    control_operator_id: str | None = None
+
+    @field_validator("allowed_symbols", mode="before")
+    @classmethod
+    def parse_allowed_symbols(cls, value: object) -> object:
+        """Allow a comma-separated pilot symbol allowlist in environment values."""
+        if isinstance(value, str):
+            return [symbol.strip().upper() for symbol in value.split(",") if symbol.strip()]
+        return value
+
+    @field_validator("rollout_owner_ids", mode="before")
+    @classmethod
+    def parse_rollout_owner_ids(cls, value: object) -> object:
+        """Allow a comma-separated explicit owner rollout list."""
+        if isinstance(value, str):
+            return [owner_id.strip() for owner_id in value.split(",") if owner_id.strip()]
+        return value
+
+    @model_validator(mode="after")
+    def validate_pilot_limits(self) -> AutoTradeSettings:
+        """Keep configured limits internally coherent; approval remains a separate gate."""
+        if self.max_notional_per_order > self.max_notional_per_day:
+            raise ValueError("max_notional_per_order must not exceed max_notional_per_day.")
+        if self.enabled and not self.allowed_symbols:
+            raise ValueError(
+                "enabled auto trading requires STOCKTRACE_AUTO_TRADE__ALLOWED_SYMBOLS.",
+            )
+        if not self.policy_version.strip():
+            raise ValueError("policy_version must not be empty.")
+        if len(set(self.rollout_owner_ids)) != len(self.rollout_owner_ids):
+            raise ValueError("rollout_owner_ids must not contain duplicates.")
+        if self.control_key is not None and not (self.control_operator_id or "").strip():
+            raise ValueError("control_operator_id is required when control_key is configured.")
+        return self
+
+    def to_pilot_policy(self) -> AutoTradePilotPolicy:
+        """Map typed deployment limits into the pure deterministic pilot gate."""
+        return AutoTradePilotPolicy(
+            enabled=self.enabled,
+            allowed_symbols=tuple(self.allowed_symbols),
+            max_notional_per_order=self.max_notional_per_order,
+            max_notional_per_day=self.max_notional_per_day,
+            max_orders_per_day=self.max_orders_per_day,
+            minimum_paper_observation=timedelta(days=self.minimum_paper_observation_days),
+            minimum_paper_completed_orders=self.minimum_paper_completed_orders,
+            policy_version=self.policy_version,
+        )
 
 
 class ObservabilitySettings(BaseModel):
@@ -249,6 +320,7 @@ class Settings(BaseSettings):
     security: SecuritySettings = Field(default_factory=SecuritySettings)
     providers: ProvidersSettings = Field(default_factory=ProvidersSettings)
     scheduler: SchedulerSettings = Field(default_factory=SchedulerSettings)
+    auto_trade: AutoTradeSettings = Field(default_factory=AutoTradeSettings)
     ai: AISettings = Field(default_factory=AISettings)
     logging: LoggingSettings = Field(default_factory=LoggingSettings)
     observability: ObservabilitySettings = Field(default_factory=ObservabilitySettings)
