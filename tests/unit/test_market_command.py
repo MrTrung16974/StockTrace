@@ -18,6 +18,7 @@ from stocktrace.infrastructure.config.settings import Settings, TelegramSettings
 from stocktrace.infrastructure.providers.financial.mock_provider import MockFinancialProvider
 from stocktrace.infrastructure.telegram.aiogram_router import (
     _build_financial_command_response,
+    _build_financial_compare_response,
     _build_trace_command_response,
     _financial_usage,
     create_router,
@@ -134,3 +135,18 @@ async def test_financial_command_response_is_command_specific() -> None:
     assert "<b>Định giá HPG</b>" in valuation_text
     assert "Trạng thái:" in valuation_text
     assert "Báo cáo phân tích tài chính" in report_text
+
+
+@pytest.mark.asyncio
+async def test_financial_compare_explains_and_verifies_result() -> None:
+    service = FinancialAnalysisService(financial_provider=MockFinancialProvider())
+    result = await service.compare("HPG", "FPT", FinancialPeriod.parse("1Y"))
+
+    text = _build_financial_compare_response(result)
+
+    assert "Vì sao có kết quả này?" in text
+    assert "Tự kiểm chứng dữ liệu" in text
+    assert "Độ tin cậy: <b>50/100</b>" in text
+    assert "chất lượng" in text
+    assert "4 kỳ" in text
+    assert "Nguồn dữ liệu mô phỏng" in text

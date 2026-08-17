@@ -17,6 +17,7 @@ from stocktrace.application.queries.stock_handlers import (
 from stocktrace.application.queries.stock_queries import GetNewsQuery, GetPriceQuery
 from stocktrace.application.services.financial.financial_analysis_service import (
     FinancialAnalysisService,
+    FinancialCompareResult,
 )
 from stocktrace.application.services.financial.snapshot_service import FinancialSnapshotService
 from stocktrace.application.services.market_analysis_service import MarketAnalysisService
@@ -67,6 +68,7 @@ from stocktrace.infrastructure.telegram.messages import (
 
 _DEFAULT_NEWS_LIMIT = 5
 _COMPARE_SYMBOL_COUNT = 2
+_PORTFOLIO_ARG_COUNT = 3
 _RECOMMENDATION_VI = {
     "STRONG SELL": "BÁN MẠNH",
     "SELL": "BÁN",
@@ -145,6 +147,88 @@ def _latest_ratio(dashboard: FinancialDashboard) -> FinancialRatio | None:
     """Return the latest ratio snapshot from a dashboard."""
     ratios = dashboard.analysis.ratios
     return ratios[-1] if ratios else None
+
+
+def _comparison_confidence(result: FinancialCompareResult) -> Decimal:
+    """Calculate deterministic confidence from evidence, never from the LLM."""
+    dashboards = (result.symbol_a, result.symbol_b)
+    confidence = min(item.analysis.quality.score for item in dashboards)
+    if any(not item.analysis.ratios for item in dashboards):
+        confidence = min(confidence, Decimal("40"))
+    if any(
+        item.analysis.fundamentals.is_mock_data
+        or item.analysis.fundamentals.data_source.lower() in {"", "unknown"}
+        for item in dashboards
+    ):
+        confidence = min(confidence, Decimal("50"))
+    return max(Decimal("0"), min(Decimal("100"), confidence))
+
+
+def _build_financial_compare_response(result: FinancialCompareResult) -> str:
+    """Build an evidence-backed, self-verified financial comparison."""
+    dashboards = (result.symbol_a, result.symbol_b)
+    analyses = tuple(item.analysis for item in dashboards)
+    symbol_a, symbol_b = (escape(item.symbol) for item in analyses)
+    scores_a = {item.category: item.score / Decimal("10") for item in analyses[0].score.categories}
+    scores_b = {item.category: item.score / Decimal("10") for item in analyses[1].score.categories}
+    categories = sorted(set(scores_a) | set(scores_b))
+    differences = sorted(
+        categories,
+        key=lambda category: abs(
+            scores_a.get(category, Decimal("0")) - scores_b.get(category, Decimal("0")),
+        ),
+        reverse=True,
+    )
+
+    lines = [
+        "<b>So sánh tài chính</b>",
+        escape(result.comparison_summary),
+        "",
+        f"<b>{symbol_a}</b>: {analyses[0].score.overall_score}/10",
+        f"<b>{symbol_b}</b>: {analyses[1].score.overall_score}/10",
+        "",
+        "<b>Vì sao có kết quả này?</b>",
+    ]
+    meaningful = [
+        category
+        for category in differences
+        if scores_a.get(category, Decimal("0")) != scores_b.get(category, Decimal("0"))
+    ]
+    if meaningful:
+        for category in meaningful[:3]:
+            value_a = scores_a.get(category, Decimal("0"))
+            value_b = scores_b.get(category, Decimal("0"))
+            leader = symbol_a if value_a > value_b else symbol_b
+            lines.append(
+                f"- {leader} cao hơn ở {_category_vi(category)}: "
+                f"{symbol_a} {value_a:.1f}/10; {symbol_b} {value_b:.1f}/10.",
+            )
+    else:
+        lines.append("- Các nhóm điểm bằng nhau; kết quả hòa được xử lý theo thứ tự mã nhập.")
+
+    confidence = _comparison_confidence(result)
+    lines.extend(["", "<b>Tự kiểm chứng dữ liệu</b>", f"Độ tin cậy: <b>{confidence:.0f}/100</b>"])
+    for analysis in analyses:
+        latest_date = (
+            analysis.statements[-1].period_end.strftime("%d/%m/%Y")
+            if analysis.statements
+            else "Chưa có"
+        )
+        source = escape(analysis.fundamentals.data_source or "unknown")
+        lines.append(
+            f"- {escape(analysis.symbol)}: chất lượng {analysis.quality.score:.0f}/100; "
+            f"{len(analysis.statements)} kỳ; mới nhất {latest_date}; nguồn {source}.",
+        )
+        lines.extend(f"  • {escape(issue)}" for issue in analysis.quality.issues)
+    lines.extend(
+        [
+            "",
+            f"Mã có điểm cao hơn: <b>{escape(result.winner)}</b>",
+            "Lưu ý: nếu hai mã khác ngành, cần đọc điểm theo đặc thù từng ngành; đây chỉ là "
+            "so sánh định lượng, không phải khuyến nghị mua bán.",
+        ],
+    )
+    return "\n".join(lines)
 
 
 def _build_trace_command_response(timeline: TraceTimeline, command_name: str) -> str:
@@ -396,7 +480,7 @@ def create_router(  # noqa: PLR0915
             return
 
         args = (command.args or "").split()
-        if len(args) < 3:
+        if len(args) < _PORTFOLIO_ARG_COUNT:
             await message.answer("Sử dụng: /padd <MÃ> <SỐ LƯỢNG> <GIÁ VỐN>")
             return
 
@@ -413,7 +497,9 @@ def create_router(  # noqa: PLR0915
             await message.answer("Đầu vào không hợp lệ. Số lượng phải là số nguyên, giá là số.")
             return
 
-        await message.answer(build_portfolio_added_message(item.symbol, item.quantity, item.average_price))
+        await message.answer(
+            build_portfolio_added_message(item.symbol, item.quantity, item.average_price),
+        )
 
     @router.message(Command("prm"))
     async def prm(message: Message, command: CommandObject) -> None:
@@ -782,20 +868,7 @@ def create_router(  # noqa: PLR0915
             )
             return
 
-        compare_text = "\n".join(
-            [
-                "<b>So sánh tài chính</b>",
-                result.comparison_summary,
-                "",
-                f"<b>{result.symbol_a.analysis.symbol}</b>: "
-                f"{result.symbol_a.analysis.score.overall_score}/10",
-                f"<b>{result.symbol_b.analysis.symbol}</b>: "
-                f"{result.symbol_b.analysis.score.overall_score}/10",
-                "",
-                f"Mã có điểm cao hơn: <b>{result.winner}</b>",
-            ]
-        )
-        await deliver_html_messages(thinking, compare_text)
+        await deliver_html_messages(thinking, _build_financial_compare_response(result))
 
     async def _run_trace_command(message: Message, command: CommandObject) -> None:
         if trace_service is None:
