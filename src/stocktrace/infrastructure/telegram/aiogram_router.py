@@ -839,6 +839,14 @@ def create_router(  # noqa: PLR0915
         command_name = getattr(command, "command", "") or ""
         thinking = await message.answer(f"⏳ Đang theo dõi diễn biến <b>{symbol}</b>...")
         try:
+            if trace_ingestion_service is not None:
+                timeline = await trace_ingestion_service.refresh_timeline(
+                    symbol,
+                    limit=min(10, settings.scheduler.trace_ingest_limit),
+                )
+            else:
+                timeline = await trace_service.build_timeline(symbol, limit=10)
+
             if command_name == "why":
                 await _build_fresh_trace_timeline(
                     trace_service=trace_service,

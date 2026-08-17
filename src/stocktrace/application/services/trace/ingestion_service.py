@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from stocktrace.application.services.trace.trace_service import TraceService
+from stocktrace.domain.entities.trace import TraceTimeline
 from stocktrace.domain.ports.official_source_provider import OfficialSourceProvider
 from stocktrace.infrastructure.logging.config import get_logger
 
@@ -50,3 +51,12 @@ class OfficialTraceIngestionService:
                 f"No official trace provider is available for {symbol}: {providers}",
             )
         return saved
+
+    async def refresh_timeline(self, symbol: str, *, limit: int) -> TraceTimeline:
+        """Ingest on demand when a timeline has no official event, then reload it."""
+        timeline = await self._trace_service.build_timeline(symbol, limit=limit)
+        if any(event.source.official for event in timeline.events):
+            return timeline
+
+        await self.ingest_symbol(symbol, limit=limit)
+        return await self._trace_service.build_timeline(symbol, limit=limit)
