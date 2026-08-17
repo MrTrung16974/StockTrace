@@ -33,7 +33,10 @@ from stocktrace.application.services.news_quality import (
 from stocktrace.application.services.portfolio import PortfolioService
 from stocktrace.application.services.stock_analysis_service import StockAnalysisService
 from stocktrace.application.services.trace import TraceService
-from stocktrace.application.services.trace.ingestion_service import OfficialTraceIngestionService
+from stocktrace.application.services.trace.ingestion_service import (
+    OfficialTraceIngestionService,
+    OfficialTraceIngestionUnavailableError,
+)
 from stocktrace.application.services.watchlist import (
     InvalidSymbolError,
     WatchlistService,
@@ -283,6 +286,31 @@ def _build_trace_command_response(timeline: TraceTimeline, command_name: str) ->
             for event in timeline.events[:5]
         )
     return "\n".join(lines)
+
+
+async def _build_fresh_trace_timeline(
+    *,
+    trace_service: TraceService,
+    trace_ingestion_service: OfficialTraceIngestionService | None,
+    settings: Settings,
+    symbol: str,
+) -> TraceTimeline:
+    """Load a trace timeline, fetching official notices when none are stored.
+
+    Scheduled ingestion only covers configured watchlists.  An interactive trace
+    command must therefore refresh the requested symbol before declaring that
+    there are no official signals.
+    """
+    timeline = await trace_service.build_timeline(symbol, limit=10)
+    has_official_event = any(event.source.official for event in timeline.events)
+    if trace_ingestion_service is None or has_official_event:
+        return timeline
+
+    await trace_ingestion_service.ingest_symbol(
+        symbol,
+        limit=settings.scheduler.trace_ingest_limit,
+    )
+    return await trace_service.build_timeline(symbol, limit=10)
 
 
 def _build_financial_command_response(
@@ -893,6 +921,12 @@ def create_router(  # noqa: PLR0915
                 timeline = await trace_service.build_timeline(symbol, limit=10)
 
             if command_name == "why":
+                await _build_fresh_trace_timeline(
+                    trace_service=trace_service,
+                    trace_ingestion_service=trace_ingestion_service,
+                    settings=settings,
+                    symbol=symbol,
+                )
                 explanation = await trace_service.explain(symbol, limit=10)
                 reasons = explanation.reasons or (
                     "Chưa có sự kiện đủ căn cứ để xác định nguyên nhân.",
@@ -916,6 +950,18 @@ def create_router(  # noqa: PLR0915
                 await deliver_html_messages(thinking, "\n".join(lines))
                 return
 
+            timeline = await _build_fresh_trace_timeline(
+                trace_service=trace_service,
+                trace_ingestion_service=trace_ingestion_service,
+                settings=settings,
+                symbol=symbol,
+            )
+        except OfficialTraceIngestionUnavailableError as exc:
+            logger.warning("trace_ingestion_unavailable", symbol=symbol, error=str(exc))
+            await thinking.edit_text(
+                "Không thể nạp công bố chính thức lúc này. Vui lòng thử lại sau.",
+            )
+            return
         except Exception as exc:
             logger.error("trace_timeline_failed", symbol=symbol, error=str(exc))
             await thinking.edit_text(f"Không thể theo dõi diễn biến của <b>{symbol}</b>.")

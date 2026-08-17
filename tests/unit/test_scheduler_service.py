@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -182,6 +183,20 @@ class FakeStockAnalysisJob:
         return None
 
 
+class FakeSuggestionAlertJob:
+    """Suggestion alert double used to verify feature-flagged registration."""
+
+    async def run(self) -> None:
+        return None
+
+
+class FakePaperConfirmationExpiryJob:
+    """Non-Telegram expiry job double used to verify autonomous registration."""
+
+    async def run(self) -> None:
+        return None
+
+
 class FakeFinancialService:
     """Financial service double that records scheduled analyses."""
 
@@ -204,18 +219,27 @@ class FakeFinancialSnapshotRepository:
 
 
 @asynccontextmanager
-async def _snapshot_repository_context(repository: FakeFinancialSnapshotRepository):
+async def _snapshot_repository_context(
+    repository: FakeFinancialSnapshotRepository,
+) -> AsyncIterator[FakeFinancialSnapshotRepository]:
     yield repository
 
 
-def _settings() -> Settings:
+def _settings(
+    *,
+    suggestion_alert_enabled: bool = False,
+    paper_confirmation_expiry_enabled: bool = False,
+    chat_id: str | None = "chat-1",
+) -> Settings:
     return Settings(
         _env_file=None,
         providers=ProvidersSettings(max_retries=0),
         redis=RedisSettings(enabled=False),
-        telegram=TelegramSettings(chat_id="chat-1"),
+        telegram=TelegramSettings(chat_id=chat_id),
         scheduler=SchedulerSettings(
             news_symbol_delay_seconds=0,
+            suggestion_alert_enabled=suggestion_alert_enabled,
+            paper_confirmation_expiry_enabled=paper_confirmation_expiry_enabled,
         ),
     )
 
@@ -231,6 +255,47 @@ def test_scheduler_settings_defaults_match_expected_schedule() -> None:
     assert settings.news_digest_hours == NEWS_DIGEST_HOURS
     assert settings.financial_daily_report_enabled is True
     assert settings.financial_daily_report_hour == FINANCIAL_DAILY_REPORT_HOUR
+    assert settings.suggestion_alert_enabled is False
+    assert settings.paper_confirmation_expiry_enabled is False
+
+
+@pytest.mark.asyncio
+async def test_scheduler_registers_injected_suggestion_alert_job_only_when_enabled() -> None:
+    scheduler = AsyncIOScheduler(timezone=ZoneInfo("Asia/Ho_Chi_Minh"))
+    service = SchedulerService(
+        quote_handler=cast(Any, FakeQuoteHandler()),
+        news_handler=cast(Any, FakeNewsHandler()),
+        watchlist_service=cast(Any, FakeWatchlistService()),
+        bot=cast(Any, FakeBot()),
+        settings=_settings(suggestion_alert_enabled=True),
+        scheduler=scheduler,
+        suggestion_alert_job=cast(Any, FakeSuggestionAlertJob()),
+    )
+
+    service.start()
+
+    assert scheduler.get_job("stocktrace-suggestion-alert") is not None
+    await service.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_scheduler_runs_confirmation_expiry_without_telegram_target() -> None:
+    scheduler = AsyncIOScheduler(timezone=ZoneInfo("Asia/Ho_Chi_Minh"))
+    service = SchedulerService(
+        quote_handler=cast(Any, FakeQuoteHandler()),
+        news_handler=cast(Any, FakeNewsHandler()),
+        watchlist_service=cast(Any, FakeWatchlistService()),
+        bot=cast(Any, FakeBot()),
+        settings=_settings(paper_confirmation_expiry_enabled=True, chat_id=None),
+        scheduler=scheduler,
+        paper_confirmation_expiry_job=cast(Any, FakePaperConfirmationExpiryJob()),
+    )
+
+    service.start()
+
+    assert scheduler.get_job("stocktrace-paper-confirmation-expiry") is not None
+    assert scheduler.get_job("stocktrace-price-alert") is None
+    await service.shutdown()
 
 
 @pytest.mark.asyncio
@@ -387,7 +452,10 @@ async def test_financial_sync_persists_each_successful_dashboard() -> None:
         watchlist_service=cast(Any, FakeWatchlistService()),
         bot=cast(Any, FakeBot()),
         settings=_settings(),
-        snapshot_repository_context_factory=lambda: _snapshot_repository_context(repository),
+        snapshot_repository_context_factory=cast(
+            Any,
+            lambda: _snapshot_repository_context(repository),
+        ),
     )
 
     await job.sync_financial_statements()

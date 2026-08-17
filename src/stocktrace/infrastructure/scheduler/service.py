@@ -28,9 +28,13 @@ from stocktrace.infrastructure.logging.config import get_logger
 from stocktrace.infrastructure.scheduler.financial_job import FinancialAnalysisJob
 from stocktrace.infrastructure.scheduler.market_analysis_job import MarketAnalysisJob
 from stocktrace.infrastructure.scheduler.market_hours import is_vn_market_open
+from stocktrace.infrastructure.scheduler.paper_confirmation_expiry_job import (
+    PaperConfirmationExpiryJob,
+)
 from stocktrace.infrastructure.scheduler.price_alert_job import PriceAlertJob
 from stocktrace.infrastructure.scheduler.protocols import TelegramMessageBot
 from stocktrace.infrastructure.scheduler.stock_analysis_job import StockAnalysisJob
+from stocktrace.infrastructure.scheduler.suggestion_alert_job import SuggestionAlertJob
 from stocktrace.infrastructure.scheduler.trace_ingestion_job import TraceIngestionJob
 
 T = TypeVar("T")
@@ -63,7 +67,9 @@ class SchedulerService:
         financial_analysis_job: FinancialAnalysisJob | None = None,
         price_alert_job: PriceAlertJob | None = None,
         policy_news_analyzer: PolicyNewsAnalyzer | None = None,
+        suggestion_alert_job: SuggestionAlertJob | None = None,
         trace_ingestion_job: TraceIngestionJob | None = None,
+        paper_confirmation_expiry_job: PaperConfirmationExpiryJob | None = None,
     ) -> None:
         self._quote_handler = quote_handler
         self._news_handler = news_handler
@@ -75,7 +81,9 @@ class SchedulerService:
         self._financial_analysis_job = financial_analysis_job
         self._price_alert_job = price_alert_job
         self._policy_news_analyzer = policy_news_analyzer or PolicyNewsAnalyzer()
+        self._suggestion_alert_job = suggestion_alert_job
         self._trace_ingestion_job = trace_ingestion_job
+        self._paper_confirmation_expiry_job = paper_confirmation_expiry_job
         self._timezone = ZoneInfo(settings.scheduler.timezone)
         self._scheduler = scheduler or AsyncIOScheduler(timezone=self._timezone)
         self._logger = get_logger(__name__)
@@ -86,20 +94,40 @@ class SchedulerService:
     @property
     def is_running(self) -> bool:
         """Return whether the scheduler is currently running."""
-        return self._scheduler.running
+        return bool(self._scheduler.running)
 
-    def start(self) -> None:
+    def start(self) -> None:  # noqa: PLR0912
         """Start scheduled jobs if they are configured."""
         if self._scheduler.running:
             return
         if not self._settings.scheduler.enabled:
             self._logger.info("scheduler_skipped", reason="disabled")
             return
-        if self._chat_id is None:
+        if self._chat_id is None and not self._paper_confirmation_expiry_is_enabled:
             self._logger.warning("scheduler_skipped", reason="missing_telegram_chat_id")
             return
+        if self._chat_id is None:
+            self._logger.info("scheduler_telegram_jobs_skipped", reason="missing_telegram_chat_id")
 
-        has_job = False
+        confirmation_expiry_job = self._paper_confirmation_expiry_job
+        if confirmation_expiry_job is not None and self._paper_confirmation_expiry_is_enabled:
+            self._scheduler.add_job(
+                confirmation_expiry_job.run,
+                IntervalTrigger(
+                    minutes=self._settings.scheduler.paper_confirmation_expiry_interval_minutes,
+                    timezone=self._timezone,
+                ),
+                id="stocktrace-paper-confirmation-expiry",
+                replace_existing=True,
+                max_instances=1,
+                coalesce=True,
+            )
+            if self._chat_id is None:
+                self._scheduler.start()
+                self._logger.info("scheduler_started")
+                return
+
+        has_job = self._paper_confirmation_expiry_is_enabled
         if self._settings.scheduler.news_enabled:
             self._scheduler.add_job(
                 self.send_news_digest,
@@ -131,6 +159,22 @@ class SchedulerService:
                     timezone=self._timezone,
                 ),
                 id="stocktrace-price-alert",
+                replace_existing=True,
+                max_instances=1,
+                coalesce=True,
+            )
+            has_job = True
+        if (
+            self._suggestion_alert_job is not None
+            and self._settings.scheduler.suggestion_alert_enabled
+        ):
+            self._scheduler.add_job(
+                self._suggestion_alert_job.run,
+                IntervalTrigger(
+                    minutes=self._settings.scheduler.suggestion_alert_interval_minutes,
+                    timezone=self._timezone,
+                ),
+                id="stocktrace-suggestion-alert",
                 replace_existing=True,
                 max_instances=1,
                 coalesce=True,
@@ -216,6 +260,14 @@ class SchedulerService:
         self._scheduler.start()
         self._logger.info("scheduler_started")
 
+    @property
+    def _paper_confirmation_expiry_is_enabled(self) -> bool:
+        """Return whether the non-Telegram confirmation-expiry job is runnable."""
+        return (
+            self._paper_confirmation_expiry_job is not None
+            and self._settings.scheduler.paper_confirmation_expiry_enabled
+        )
+
     async def shutdown(self) -> None:
         """Stop scheduled jobs."""
         if self._scheduler.running:
@@ -238,15 +290,18 @@ class SchedulerService:
         semaphore = asyncio.Semaphore(5)
 
         async def _fetch_news(symbol: str) -> tuple[str, list[NewsArticle]]:
+            async def _operation() -> list[NewsArticle]:
+                return await self._news_handler.handle(
+                    GetNewsQuery(
+                        symbol=symbol,
+                        limit=self._settings.scheduler.news_digest_limit,
+                        force_refresh=True,
+                    ),
+                )
+
             async with semaphore:
                 articles = await self._run_with_retry(
-                    lambda s=symbol: self._news_handler.handle(
-                        GetNewsQuery(
-                            symbol=s,
-                            limit=self._settings.scheduler.news_digest_limit,
-                            force_refresh=True,
-                        ),
-                    ),
+                    _operation,
                     symbol=symbol,
                     job_name="news_digest",
                 )
@@ -303,13 +358,19 @@ class SchedulerService:
             return
 
         # Fetch all symbols concurrently — latency = max(individual latencies)
+        async def _fetch_quote(symbol: str) -> StockQuote | None:
+            async def _operation() -> StockQuote | None:
+                return await self._quote_handler.handle(GetPriceQuery(symbol=symbol))
+
+            return await self._run_with_retry(
+                _operation,
+                symbol=symbol,
+                job_name="price_alert",
+            )
+
         results = await asyncio.gather(
             *[
-                self._run_with_retry(
-                    lambda s=symbol: self._quote_handler.handle(GetPriceQuery(symbol=s)),
-                    symbol=symbol,
-                    job_name="price_alert",
-                )
+                _fetch_quote(symbol)
                 for symbol in symbols
             ],
             return_exceptions=True,

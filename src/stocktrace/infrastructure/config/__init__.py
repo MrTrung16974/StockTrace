@@ -2,8 +2,9 @@
 
 from stocktrace.infrastructure.config.settings import (
     AISettings,
-    AppSettings,
     ApiSettings,
+    AppSettings,
+    AutoTradeSettings,
     CacheSettings,
     DatabaseSettings,
     Environment,
@@ -20,8 +21,9 @@ from stocktrace.infrastructure.config.settings import (
 
 __all__ = [
     "AISettings",
-    "AppSettings",
     "ApiSettings",
+    "AppSettings",
+    "AutoTradeSettings",
     "CacheSettings",
     "DatabaseSettings",
     "Environment",
