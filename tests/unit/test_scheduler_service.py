@@ -571,9 +571,13 @@ async def test_price_alert_sends_when_change_reaches_threshold() -> None:
     message = bot.messages[0]
     assert message["chat_id"] == "chat-1"
     assert message["parse_mode"] == "HTML"
-    assert "BIẾN ĐỘNG GIÁ" in message["text"]
-    assert "100 → 100.10" in message["text"]
-    assert "+0.10%" in message["text"]
+    lines = message["text"].splitlines()
+    assert lines[0].startswith("🔔 <b>BIẾN ĐỘNG GIÁ FPT</b> — 100 → 100.10")
+    assert "+0.10%" in lines[0]
+    assert lines[1] == "Giá hiện tại: 100.10 VND | Phiên: 0 (0.00%)"
+    assert lines[2] == "Mở/Cao/Thấp: 100.10 / 100.10 / 100.10"
+    assert lines[3] == "Khối lượng: 1 | FPT Corp"
+    assert lines[4] == "Nguồn: test"
 
 
 @pytest.mark.asyncio

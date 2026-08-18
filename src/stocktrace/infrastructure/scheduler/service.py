@@ -510,14 +510,27 @@ class SchedulerService:
         return events
 
     def _build_price_alert_message(self, events: list[PriceChangeEvent], *, now: datetime) -> str:
-        lines = [f"🔔 <b>BIẾN ĐỘNG GIÁ</b> — {now:%H:%M}", ""]
-        for event in events:
+        """Build an alert whose first line is useful in a mobile notification preview."""
+        lines: list[str] = []
+        for index, event in enumerate(events):
             quote = event.quote
-            lines.append(
-                f"<b>{escape(quote.ticker)}</b>: "
-                f"{_format_price(event.previous_price)} → {_format_price(quote.current_price)} "
-                f"{_trend_icon(event.change_percent)} {_format_percent(event.change_percent)}"
+            lines.extend(
+                [
+                    f"🔔 <b>BIẾN ĐỘNG GIÁ {escape(quote.ticker)}</b> — "
+                    f"{_format_price(event.previous_price)} → {_format_price(quote.current_price)} "
+                    f"{_trend_icon(event.change_percent)} {_format_percent(event.change_percent)} "
+                    f"• {now:%H:%M}",
+                    f"Giá hiện tại: {_format_price(quote.current_price)} {escape(quote.currency)} "
+                    f"| Phiên: {_format_signed_price(quote.change)} "
+                    f"({_format_percent(quote.change_percent)})",
+                    f"Mở/Cao/Thấp: {_format_price(quote.open_price)} / "
+                    f"{_format_price(quote.high_price)} / {_format_price(quote.low_price)}",
+                    f"Khối lượng: {quote.volume:,} | {escape(quote.company_name)}",
+                    f"Nguồn: {escape(quote.source)}",
+                ],
             )
+            if index < len(events) - 1:
+                lines.append("")
         return "\n".join(lines)
 
 
@@ -541,6 +554,11 @@ def _format_price(value: Decimal) -> str:
     if value == value.to_integral():
         return f"{int(value):,}"
     return f"{value:,.2f}"
+
+
+def _format_signed_price(value: Decimal) -> str:
+    prefix = "+" if value > 0 else ""
+    return f"{prefix}{_format_price(value)}"
 
 
 def _format_percent(value: Decimal) -> str:
