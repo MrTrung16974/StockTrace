@@ -512,25 +512,14 @@ class SchedulerService:
     def _build_price_alert_message(self, events: list[PriceChangeEvent], *, now: datetime) -> str:
         """Build an alert whose first line is useful in a mobile notification preview."""
         lines: list[str] = []
-        for index, event in enumerate(events):
+        for event in events:
             quote = event.quote
-            lines.extend(
-                [
-                    f"🔔 <b>BIẾN ĐỘNG GIÁ {escape(quote.ticker)}</b> — "
-                    f"{_format_price(event.previous_price)} → {_format_price(quote.current_price)} "
-                    f"{_trend_icon(event.change_percent)} {_format_percent(event.change_percent)} "
-                    f"• {now:%H:%M}",
-                    f"Giá hiện tại: {_format_price(quote.current_price)} {escape(quote.currency)} "
-                    f"| Phiên: {_format_signed_price(quote.change)} "
-                    f"({_format_percent(quote.change_percent)})",
-                    f"Mở/Cao/Thấp: {_format_price(quote.open_price)} / "
-                    f"{_format_price(quote.high_price)} / {_format_price(quote.low_price)}",
-                    f"Khối lượng: {quote.volume:,} | {escape(quote.company_name)}",
-                    f"Nguồn: {escape(quote.source)}",
-                ],
+            lines.append(
+                f"[{escape(quote.ticker)}] — "
+                f"{_format_price(event.previous_price)} → {_format_price(quote.current_price)} "
+                f"{_trend_icon(event.change_percent)} {_format_percent(event.change_percent)} "
+                f"• {now:%H:%M}"
             )
-            if index < len(events) - 1:
-                lines.append("")
         return "\n".join(lines)
 
 
