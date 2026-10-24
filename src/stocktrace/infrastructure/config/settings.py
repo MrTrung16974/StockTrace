@@ -157,11 +157,11 @@ class SchedulerSettings(BaseModel):
     watchlist_symbols: Annotated[list[str], NoDecode] = Field(default_factory=list)
     disabled_symbols: Annotated[list[str], NoDecode] = Field(default_factory=list)
     price_enabled: bool = True
-    news_enabled: bool = True
+    news_enabled: bool = False
     news_digest_hours: list[int] = Field(default_factory=lambda: [8, 12, 16, 20])
-    price_alert_interval_minutes: int = Field(default=1, ge=1)
+    price_alert_interval_minutes: int = Field(default=15, ge=1)
     price_change_threshold_percent: Decimal = Field(default=Decimal("0.1"), gt=0)
-    price_alert_cooldown_minutes: int = Field(default=5, ge=0)
+    price_alert_cooldown_minutes: int = Field(default=15, ge=0)
     suggestion_alert_enabled: bool = False
     suggestion_alert_interval_minutes: int = Field(default=5, ge=1)
     paper_confirmation_expiry_enabled: bool = False
@@ -172,13 +172,14 @@ class SchedulerSettings(BaseModel):
     analysis_symbols: Annotated[list[str], NoDecode] = Field(default_factory=list)
     morning_report_hour: int = Field(default=8, ge=0, le=23)
     evening_report_hour: int = Field(default=20, ge=0, le=23)
-    financial_daily_report_enabled: bool = True
+    financial_daily_report_enabled: bool = False
+    financial_sync_enabled: bool = False
     financial_daily_report_hour: int = Field(default=9, ge=0, le=23)
     market_analysis_enabled: bool = False
     market_daily_report_hour: int = Field(default=16, ge=0, le=23)
     market_morning_report_hour: int = Field(default=7, ge=0, le=23)
     market_evening_report_hour: int = Field(default=19, ge=0, le=23)
-    trace_ingest_enabled: bool = True
+    trace_ingest_enabled: bool = False
     trace_ingest_hour: int = Field(default=7, ge=0, le=23)
     trace_ingest_limit: int = Field(default=20, ge=1, le=100)
 

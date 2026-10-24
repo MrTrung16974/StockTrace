@@ -26,9 +26,9 @@ from stocktrace.infrastructure.config import (
 from stocktrace.infrastructure.scheduler.financial_job import FinancialAnalysisJob
 from stocktrace.infrastructure.scheduler.service import SchedulerService
 
-PRICE_INTERVAL_MINUTES = 1
+PRICE_INTERVAL_MINUTES = 15
 PRICE_CHANGE_THRESHOLD_PERCENT = Decimal("0.1")
-PRICE_ALERT_COOLDOWN_MINUTES = 5
+PRICE_ALERT_COOLDOWN_MINUTES = 15
 NEWS_DIGEST_HOURS = [8, 12, 16, 20]
 FINANCIAL_DAILY_REPORT_HOUR = 9
 TWO_ITEMS = 2
@@ -183,6 +183,13 @@ class FakeStockAnalysisJob:
         return None
 
 
+class FakeMarketAnalysisJob:
+    """Market job double used to verify feature-flagged registration."""
+
+    async def run_daily_report(self) -> None:
+        return None
+
+
 class FakeSuggestionAlertJob:
     """Suggestion alert double used to verify feature-flagged registration."""
 
@@ -248,12 +255,14 @@ def test_scheduler_settings_defaults_match_expected_schedule() -> None:
     settings = SchedulerSettings()
 
     assert settings.price_enabled is True
-    assert settings.news_enabled is True
+    assert settings.news_enabled is False
     assert settings.price_alert_interval_minutes == PRICE_INTERVAL_MINUTES
     assert settings.price_change_threshold_percent == PRICE_CHANGE_THRESHOLD_PERCENT
     assert settings.price_alert_cooldown_minutes == PRICE_ALERT_COOLDOWN_MINUTES
     assert settings.news_digest_hours == NEWS_DIGEST_HOURS
-    assert settings.financial_daily_report_enabled is True
+    assert settings.financial_daily_report_enabled is False
+    assert settings.financial_sync_enabled is False
+    assert settings.trace_ingest_enabled is False
     assert settings.financial_daily_report_hour == FINANCIAL_DAILY_REPORT_HOUR
     assert settings.suggestion_alert_enabled is False
     assert settings.paper_confirmation_expiry_enabled is False
@@ -301,12 +310,14 @@ async def test_scheduler_runs_confirmation_expiry_without_telegram_target() -> N
 @pytest.mark.asyncio
 async def test_scheduler_registers_daily_financial_report_at_9am() -> None:
     scheduler = AsyncIOScheduler(timezone=ZoneInfo("Asia/Ho_Chi_Minh"))
+    settings = _settings()
+    settings.scheduler.financial_daily_report_enabled = True
     service = SchedulerService(
         quote_handler=cast(Any, FakeQuoteHandler()),
         news_handler=cast(Any, FakeNewsHandler()),
         watchlist_service=cast(Any, FakeWatchlistService()),
         bot=cast(Any, FakeBot()),
-        settings=_settings(),
+        settings=settings,
         scheduler=scheduler,
         financial_analysis_job=cast(Any, FakeFinancialAnalysisJob()),
     )
@@ -316,6 +327,35 @@ async def test_scheduler_registers_daily_financial_report_at_9am() -> None:
     job = scheduler.get_job("stocktrace-financial-daily-report")
     assert job is not None
     assert str(job.trigger).startswith("cron[hour='9', minute='0']")
+
+    await service.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_scheduler_skips_optional_jobs_when_disabled() -> None:
+    scheduler = AsyncIOScheduler(timezone=ZoneInfo("Asia/Ho_Chi_Minh"))
+    service = SchedulerService(
+        quote_handler=cast(Any, FakeQuoteHandler()),
+        news_handler=cast(Any, FakeNewsHandler()),
+        watchlist_service=cast(Any, FakeWatchlistService()),
+        bot=cast(Any, FakeBot()),
+        settings=_settings(),
+        scheduler=scheduler,
+        market_analysis_job=cast(Any, FakeMarketAnalysisJob()),
+        financial_analysis_job=cast(Any, FakeFinancialAnalysisJob()),
+        trace_ingestion_job=cast(Any, FakeTraceIngestionJob()),
+    )
+
+    service.start()
+
+    assert scheduler.get_job("stocktrace-price-alert") is not None
+    assert scheduler.get_job("stocktrace-news-digest") is None
+    assert scheduler.get_job("stocktrace-market-daily-overview") is None
+    assert scheduler.get_job("stocktrace-financial-daily-report") is None
+    assert scheduler.get_job("stocktrace-financial-weekly-sync") is None
+    assert scheduler.get_job("stocktrace-valuation-monthly") is None
+    assert scheduler.get_job("stocktrace-financial-quarterly") is None
+    assert scheduler.get_job("stocktrace-trace-official-ingest") is None
 
     await service.shutdown()
 
@@ -359,12 +399,14 @@ async def test_scheduler_never_registers_ai_reports() -> None:
 @pytest.mark.asyncio
 async def test_scheduler_registers_official_trace_ingestion_job() -> None:
     scheduler = AsyncIOScheduler(timezone=ZoneInfo("Asia/Ho_Chi_Minh"))
+    settings = _settings()
+    settings.scheduler.trace_ingest_enabled = True
     service = SchedulerService(
         quote_handler=cast(Any, FakeQuoteHandler()),
         news_handler=cast(Any, FakeNewsHandler()),
         watchlist_service=cast(Any, FakeWatchlistService()),
         bot=cast(Any, FakeBot()),
-        settings=_settings(),
+        settings=settings,
         scheduler=scheduler,
         trace_ingestion_job=cast(Any, FakeTraceIngestionJob()),
     )
@@ -394,7 +436,7 @@ async def test_scheduler_registers_price_alert_without_optional_adapter() -> Non
 
     job = scheduler.get_job("stocktrace-price-alert")
     assert job is not None
-    assert str(job.trigger).startswith("interval[0:01:00]")
+    assert str(job.trigger).startswith("interval[0:15:00]")
 
     await service.shutdown()
 
@@ -603,7 +645,7 @@ async def test_price_alert_uses_cooldown_but_keeps_latest_snapshot() -> None:
         await service.send_price_alert()
         mock_datetime.now.return_value = MARKET_OPEN_TIME + timedelta(minutes=2)
         await service.send_price_alert()
-        mock_datetime.now.return_value = MARKET_OPEN_TIME + timedelta(minutes=6)
+        mock_datetime.now.return_value = MARKET_OPEN_TIME + timedelta(minutes=16)
         await service.send_price_alert()
 
     assert len(bot.messages) == TWO_ITEMS

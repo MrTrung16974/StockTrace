@@ -1,16 +1,10 @@
 #!/bin/bash
 set -e
 
-# Dừng các container hiện tại (nếu có)
-docker compose down
+# Chỉ build API và tận dụng cache dependency/Docker layer.
+docker compose build api
 
-# Xóa các image dangling (không bắt buộc nhưng giúp dọn dẹp)
-# docker image prune -f
+# Chỉ thay container có thay đổi; không dừng PostgreSQL/Redis vô ích.
+docker compose up -d --remove-orphans
 
-# Build lại các image không sử dụng cache
-docker compose build --no-cache
-
-# Khởi chạy các container ở chế độ background
-docker compose up -d
-
-echo "Đã chạy xong docker compose với tùy chọn xóa cache!"
+echo "StockTrace đã được build và khởi chạy."

@@ -183,7 +183,10 @@ class SchedulerService:
         # LLM-backed stock reports are deliberately never registered. The daily
         # market snapshot remains data-only because MarketAnalysisService defaults
         # to use_ai=False. AI may only run from an explicit analysis request.
-        if self._market_analysis_job is not None:
+        if (
+            self._market_analysis_job is not None
+            and self._settings.scheduler.market_analysis_enabled
+        ):
             self._scheduler.add_job(
                 self._market_analysis_job.run_daily_report,
                 CronTrigger(
@@ -213,31 +216,39 @@ class SchedulerService:
                     max_instances=1,
                     coalesce=True,
                 )
-            self._scheduler.add_job(
-                self._financial_analysis_job.sync_financial_statements,
-                CronTrigger(day_of_week="sun", hour=2, minute=0, timezone=self._timezone),
-                id="stocktrace-financial-weekly-sync",
-                replace_existing=True,
-                max_instances=1,
-                coalesce=True,
-            )
-            self._scheduler.add_job(
-                self._financial_analysis_job.recalculate_valuations,
-                CronTrigger(day=1, hour=3, minute=0, timezone=self._timezone),
-                id="stocktrace-valuation-monthly",
-                replace_existing=True,
-                max_instances=1,
-                coalesce=True,
-            )
-            self._scheduler.add_job(
-                self._financial_analysis_job.refresh_quarterly_reports,
-                CronTrigger(month="1,4,7,10", day=15, hour=4, minute=0, timezone=self._timezone),
-                id="stocktrace-financial-quarterly",
-                replace_existing=True,
-                max_instances=1,
-                coalesce=True,
-            )
-            has_job = True
+                has_job = True
+            if self._settings.scheduler.financial_sync_enabled:
+                self._scheduler.add_job(
+                    self._financial_analysis_job.sync_financial_statements,
+                    CronTrigger(day_of_week="sun", hour=2, minute=0, timezone=self._timezone),
+                    id="stocktrace-financial-weekly-sync",
+                    replace_existing=True,
+                    max_instances=1,
+                    coalesce=True,
+                )
+                self._scheduler.add_job(
+                    self._financial_analysis_job.recalculate_valuations,
+                    CronTrigger(day=1, hour=3, minute=0, timezone=self._timezone),
+                    id="stocktrace-valuation-monthly",
+                    replace_existing=True,
+                    max_instances=1,
+                    coalesce=True,
+                )
+                self._scheduler.add_job(
+                    self._financial_analysis_job.refresh_quarterly_reports,
+                    CronTrigger(
+                        month="1,4,7,10",
+                        day=15,
+                        hour=4,
+                        minute=0,
+                        timezone=self._timezone,
+                    ),
+                    id="stocktrace-financial-quarterly",
+                    replace_existing=True,
+                    max_instances=1,
+                    coalesce=True,
+                )
+                has_job = True
 
         if self._trace_ingestion_job is not None and self._settings.scheduler.trace_ingest_enabled:
             self._scheduler.add_job(
